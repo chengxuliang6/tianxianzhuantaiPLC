@@ -141,8 +141,10 @@ a changed `BUFFER_ACK_SEQ` after the PC has durably saved it.
 The supplied `PRG_MAIN` uses the LiteST manual-confirmed pin names. Motion
 inputs latch on an `Execute` rising edge; positive/negative `Distance` selects
 direction; `CurveType=0` is trapezoidal. `MC_Stop.Done=TRUE` while Execute is
-still true holds the axis in Stopping, so the program resets `bStopExecute`
-only after Done and can then enter Standstill. It intentionally has no
+still true holds the axis in Stopping. The program resets `bStopExecute` after
+Done **or Error** so a failed Stop instruction cannot remain concurrently
+asserted with `MC_Reset`; an Error is still an unsafe terminal fault and does
+not confirm standstill or permit automatic restart. It intentionally has no
 immediate-stop/emergency-stop behavior.
 
 Stop sequence changes are checked before starts. All sequence and heartbeat

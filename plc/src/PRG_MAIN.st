@@ -23,6 +23,7 @@ VAR
     bVelocityValid, bVelocityBusy, bVelocityError : BOOL;
     iVelocityErrorID : INT;
     rPreviousPosition : REAL;
+    rLoggerPosition : REAL;
     bLoggerStarted, bLoggerFinished, bLoggerAck : BOOL;
     bLoggerBufferReady : BOOL;
     uiLoggerEventCount, uiLoggerGeneration : UINT;
@@ -54,6 +55,11 @@ MC_ReadActualVelocity(Enable := TRUE, Axis := Axis_0,
     Valid => bVelocityValid, Busy => bVelocityBusy,
     Velocity => rActualVelocity,
     Error => bVelocityError, ErrorID => iVelocityErrorID);
+
+(* Invalid position feedback must not create synthetic degree crossings. *)
+IF bPositionValid AND NOT bPositionError THEN
+    rLoggerPosition := rActualPosition;
+END_IF;
 
 (* 2. Deterministic command/state decision uses current feedback and raw INT wire words. *)
 fbControl(
@@ -113,7 +119,7 @@ MC_Stop(Execute := bStopExecute, Axis := Axis_0,
     Done => bStopDone, Busy => bStopBusy,
     Error => bStopError, ErrorID => iStopErrorID);
 (* Done with Execute TRUE holds Stopping; reset only after Done permits Standstill. *)
-IF bStopDone THEN
+IF bStopDone OR bStopError THEN
     bStopExecute := FALSE;
 END_IF;
 
@@ -124,13 +130,15 @@ MC_Power(Enable := bPowerEnable, Axis := Axis_0,
 (* 4. Capture all crossed travel integers, then publish a stable register snapshot. *)
 bLoggerStarted := fbControl.bRunStarted; bLoggerFinished := fbControl.bRunFinished;
 bLoggerAck := fbControl.bBufferAckEdge;
-fbLogger(rPreviousPositionDeg := rPreviousPosition, rCurrentPositionDeg := rActualPosition,
+fbLogger(rPreviousPositionDeg := rPreviousPosition, rCurrentPositionDeg := rLoggerPosition,
     rRunOriginDeg := fbControl.rRunOriginDeg, iDirection := fbControl.iRunDirection,
     udiRunStartTickMs := fbControl.udiRunStartTickMs, udiNowTickMs := udiPlcTickMs,
     bRunStarted := bLoggerStarted, bRunFinished := bLoggerFinished, bBufferAckEdge := bLoggerAck,
     aEventWords := aD2000Events, bBufferReady => bLoggerBufferReady,
     uiEventCount => uiLoggerEventCount, uiGeneration => uiLoggerGeneration);
-rPreviousPosition := rActualPosition;
+IF bPositionValid AND NOT bPositionError THEN
+    rPreviousPosition := rLoggerPosition;
+END_IF;
 
 iD1100RunState := INT(fbControl.uiRunState); iD1101StatusFlags := INT(fbControl.uiStatusFlags);
 iD1102FaultCode := INT(fbControl.uiFaultCode); iD1109HeartbeatEcho := INT(fbControl.uiHeartbeatEcho);

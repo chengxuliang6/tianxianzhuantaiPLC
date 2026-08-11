@@ -57,7 +57,7 @@ IF NOT bBufferReady AND NOT bRunStarted THEN
     iFirstAngle := MAX(1, REAL_TO_INT(FLOOR(rPreviousTravel)) + 1);
     iLastAngle := MIN(360, REAL_TO_INT(FLOOR(rCurrentTravel)));
 
-    (* Fixed guard: at most 60 writes even after a position discontinuity. *)
+    (* Fixed guard: at most 360 legal travel-angle writes per scan. *)
     FOR iCrossing := 1 TO 360 DO
         iTravelAngle := iFirstAngle + iCrossing - 1;
         IF iTravelAngle > iLastAngle THEN

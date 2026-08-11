@@ -86,7 +86,10 @@ END_IF;
 IF bResetPending AND (bResetDone OR bResetError) THEN
     uiResetFaultAckSeq := uiResetPendingSeq; bResetPending := FALSE;
     IF bResetDone THEN
-        uiFaultCode := FAULT_NONE; bUnsafeStopFailure := FALSE;
+        uiFaultCode := FAULT_NONE; uiRunStatus := RUN_IDLE;
+        bFaultStopPending := FALSE; uiPendingFaultCode := FAULT_NONE;
+        bStopLatched := FALSE; bUnsafeStopFailure := FALSE;
+        uiRetainedStopReason := RUN_IDLE; uiRetainedStopReasonNv := RUN_IDLE;
         IF bZeroValid THEN uiRunState := STATE_READY; ELSE uiRunState := STATE_ZERO_REQUIRED; END_IF;
     ELSE
         uiRunState := STATE_FAULT; uiRunStatus := RUN_FAULTED; uiFaultCode := FAULT_RESET;
@@ -104,13 +107,14 @@ IF uiStopSeq <> uiStopAckSeq THEN
         uiRetainedStopReasonNv := uiRetainedStopReason; uiRunStatus := uiRetainedStopReason;
     END_IF;
 ELSIF bActiveRun AND NOT bStopLatched AND
-      (bPositionReadError OR bVelocityReadError OR bPowerError OR bMoveError OR bMoveAborted) THEN
+      (bPositionReadError OR bVelocityReadError OR NOT bPositionValid OR NOT bVelocityValid
+       OR bPowerError OR bMoveError OR bMoveAborted) THEN
     (* Preserve active motion and command MC_Stop in this scan; only Done seals it. *)
     bStopLatched := TRUE; bFaultStopPending := TRUE; bStopRequest := TRUE;
     uiRunState := STATE_STOPPING; uiRunStatus := RUN_FAULTED;
     uiRetainedStopReason := RUN_FAULTED; uiRetainedStopReasonNv := RUN_FAULTED;
-    IF bPositionReadError THEN uiPendingFaultCode := FAULT_POSITION_READ;
-    ELSIF bVelocityReadError THEN uiPendingFaultCode := FAULT_VELOCITY_READ;
+    IF bPositionReadError OR NOT bPositionValid THEN uiPendingFaultCode := FAULT_POSITION_READ;
+    ELSIF bVelocityReadError OR NOT bVelocityValid THEN uiPendingFaultCode := FAULT_VELOCITY_READ;
     ELSE uiPendingFaultCode := FAULT_MOTION; END_IF;
 ELSIF bActiveRun AND NOT bStopLatched AND (uiHeartbeatAgeScans > 1000) THEN
     bStopLatched := TRUE; bStopRequest := TRUE; uiRunState := STATE_STOPPING;
@@ -164,6 +168,9 @@ ELSIF uiStartSeq <> uiStartAckSeq THEN
     IF ABS(rMoveDistance) < 0.001 THEN bStartAccepted := FALSE; END_IF;
     IF bStartAccepted THEN
         (* Parameters are validated and latched only at accepted-run boundary. *)
+        uiFaultCode := FAULT_NONE; bFaultStopPending := FALSE;
+        uiPendingFaultCode := FAULT_NONE; bStopLatched := FALSE;
+        uiRetainedStopReason := RUN_IDLE; uiRetainedStopReasonNv := RUN_IDLE;
         rAcceleration := DINT_TO_REAL(diRequestedAccelMilli) / 1000.0;
         rDeceleration := DINT_TO_REAL(diRequestedDecelMilli) / 1000.0;
         rStopDeceleration := DINT_TO_REAL(diRequestedStopDecelMilli) / 1000.0;

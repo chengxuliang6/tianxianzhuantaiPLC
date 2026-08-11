@@ -36,7 +36,7 @@ def test_main_has_all_manual_confirmed_plcopen_calls_and_pins() -> None:
 def test_stop_done_releases_execute_and_has_priority_over_start() -> None:
     main = source("PRG_MAIN.st")
     controller = source("FB_TurntableControl.st")
-    assert re.search(r"IF\s+bStopDone\s+THEN\s*\n\s*bStopExecute\s*:=\s*FALSE", main)
+    assert re.search(r"IF\s+bStopDone\s+OR\s+bStopError\s+THEN\s*\n\s*bStopExecute\s*:=\s*FALSE", main)
     assert controller.index("STOP_SEQ") < controller.index("START_SEQ")
 
 
@@ -88,6 +88,29 @@ def test_readme_documents_u32_reset_and_unsafe_stop_response() -> None:
     readme = (PLC / "README.md").read_text(encoding="utf-8")
     for token in ("raw u32", "decode_u32", "MC_Reset", "FAULT_STOP_UNSAFE", "4320 bytes", "360-write"):
         assert token in readme
+
+
+def test_invalid_feedback_is_stop_fault_and_logger_never_consumes_invalid_position() -> None:
+    controller = source("FB_TurntableControl.st")
+    main = source("PRG_MAIN.st")
+    assert "NOT bPositionValid OR NOT bVelocityValid" in controller
+    assert "IF bPositionReadError OR NOT bPositionValid" in controller
+    assert "IF bPositionValid AND NOT bPositionError THEN" in main
+    assert "rCurrentPositionDeg := rLoggerPosition" in main
+    assert "rPreviousPosition := rLoggerPosition" in main
+
+
+def test_stop_error_releases_execute_and_reset_start_clear_fault_latches() -> None:
+    controller = source("FB_TurntableControl.st")
+    main = source("PRG_MAIN.st")
+    assert "IF bStopDone OR bStopError THEN" in main
+    for token in (
+        "uiRunStatus := RUN_IDLE",
+        "bFaultStopPending := FALSE",
+        "uiPendingFaultCode := FAULT_NONE",
+        "bStopLatched := FALSE",
+    ):
+        assert token in controller
 
 
 def test_modbus_words_are_globally_declared_once_not_locally_redeclared() -> None:
