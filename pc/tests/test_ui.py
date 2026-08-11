@@ -4,9 +4,10 @@ from pathlib import Path
 from dataclasses import replace
 from threading import Thread, get_ident
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDesktopServices, QKeySequence
-from PySide6.QtWidgets import QAbstractButton, QGroupBox, QLabel, QMessageBox
+from PySide6.QtWidgets import QApplication, QAbstractButton, QGroupBox, QLabel, QMessageBox
 
 from turntable_control.controller import ControllerSnapshot, ControllerStopped
 from turntable_control.domain import Direction, Mode, RunState, RunStatus
@@ -129,6 +130,31 @@ class FakeController:
     def emit_saved(self, path: Path) -> None:
         for callback in tuple(self.saved_callbacks):
             callback(path)  # type: ignore[operator]
+
+
+class SubscriptionFailController(FakeController):
+    def __init__(self, fail_at: int) -> None:
+        super().__init__()
+        self.fail_at = fail_at
+        self.subscription_attempt = 0
+
+    def _subscribe(self, name: str, callbacks: list[object], callback: object):
+        self.subscription_attempt += 1
+        if self.subscription_attempt == self.fail_at:
+            raise RuntimeError(f"订阅位置 {self.fail_at} 失败")
+        return super()._subscribe(name, callbacks, callback)
+
+
+class InspectShutdownController(FakeController):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bridge_active_during_shutdown: bool | None = None
+
+    def shutdown(self, timeout: float | None = None) -> None:
+        self.bridge_active_during_shutdown = all(
+            (self.snapshot_callbacks, self.error_callbacks, self.saved_callbacks)
+        )
+        super().shutdown(timeout)
 
 
 class FakeFactory:
@@ -320,6 +346,50 @@ def test_unknown_run_state_fails_closed_and_displays_raw_value(qtbot, tmp_path: 
 
     assert window.run_state_label.text() == "未知（99）"
     assert not window.start_button.isEnabled()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        status_snapshot(run_state=99, run_status=RunStatus.IDLE),
+        status_snapshot(run_state=RunState.READY, run_status=77),
+    ],
+    ids=("raw-run-state", "raw-run-status"),
+)
+def test_raw_state_or_status_allows_only_stop_and_disconnect(
+    qtbot, tmp_path: Path, status: StatusSnapshot
+) -> None:
+    window = make_window(qtbot, tmp_path)
+
+    window.apply_snapshot(connected_snapshot(status=status, download_pending=True))
+
+    for widget in (
+        window.ip_edit,
+        window.connect_button,
+        window.mode_combo,
+        window.direction_combo,
+        window.speed_combo,
+        window.start_button,
+        window.set_zero_button,
+        window.power_button,
+        window.reset_button,
+        window.retry_button,
+        window.advanced_toggle,
+        window.open_data_button,
+    ):
+        assert not widget.isEnabled()
+    assert window.stop_button.isEnabled()
+    assert window.disconnect_button.isEnabled()
+
+
+def test_start_requires_exact_ready_and_idle(qtbot, tmp_path: Path) -> None:
+    window = make_window(qtbot, tmp_path)
+
+    window.apply_snapshot(
+        connected_snapshot(status=status_snapshot(run_state=RunState.READY, run_status=RunStatus.RUNNING))
+    )
+
+    assert not window.start_button.isEnabled()
     assert window.stop_button.isEnabled()
 
     window.apply_snapshot(connected_snapshot(status=status_snapshot(run_state=2, run_status=1)))
@@ -361,6 +431,25 @@ def test_terminal_statuses_event_count_pending_retry_and_saved_path(qtbot, tmp_p
     saved_path = tmp_path / "run_123.csv"
     window.apply_saved_path(saved_path)
     assert window.csv_path_label.text() == str(saved_path)
+    assert window.csv_status_label.text() == "已保存，等待 PLC 确认"
+
+
+def test_csv_status_distinguishes_unsaved_ack_pending_and_acknowledged(
+    qtbot, tmp_path: Path
+) -> None:
+    window = make_window(qtbot, tmp_path)
+    saved_path = tmp_path / "durable.csv"
+
+    window.apply_snapshot(connected_snapshot(download_pending=True))
+    assert window.csv_status_label.text() == "待下载或保存"
+
+    window.apply_saved_path(saved_path)
+    assert window.csv_status_label.text() == "已保存，等待 PLC 确认"
+
+    window.apply_snapshot(connected_snapshot(download_pending=True, saved_csv=saved_path))
+    assert window.csv_status_label.text() == "已保存，等待 PLC 确认"
+
+    window.apply_snapshot(connected_snapshot(download_pending=False, saved_csv=saved_path))
     assert window.csv_status_label.text() == "已保存"
 
 
@@ -425,6 +514,52 @@ def test_first_connect_background_start_failure_cleans_up_and_allows_retry(
     assert [call[0] for call in replacement.calls[-2:]] == ["connect", "start_background"]
 
 
+def test_first_connect_cleanup_failure_retains_live_controller_bridge(
+    qtbot, tmp_path: Path
+) -> None:
+    controller = FakeController()
+    controller.failures["start_background"] = RuntimeError("后台线程启动失败")
+    controller.failures["shutdown"] = ControllerStopped("清理未停止")
+    window = MainWindow(lambda _ip: controller, tmp_path, initial_ip="192.0.2.29")
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.mouseClick(window.connect_button, Qt.LeftButton)
+
+    assert window._controller is controller
+    assert window._bridge is not None
+    assert all((controller.snapshot_callbacks, controller.error_callbacks, controller.saved_callbacks))
+    assert "后台线程启动失败" in window.message_label.text()
+    assert "清理未停止" in window.message_label.text()
+
+    worker = Thread(target=controller.emit_error, args=("仍可接收控制器错误",))
+    worker.start()
+    worker.join()
+    QApplication.processEvents()
+    assert "仍可接收控制器错误" in window.message_label.text()
+
+
+@pytest.mark.parametrize("fail_at", [1, 2, 3])
+def test_partial_bridge_subscription_unwinds_and_bounded_shutdowns_local_controller(
+    qtbot, tmp_path: Path, fail_at: int
+) -> None:
+    controller = SubscriptionFailController(fail_at)
+    window = MainWindow(lambda _ip: controller, tmp_path, initial_ip="192.0.2.26")
+    qtbot.addWidget(window)
+    window.show()
+
+    qtbot.mouseClick(window.connect_button, Qt.LeftButton)
+
+    assert f"订阅位置 {fail_at} 失败" in window.message_label.text()
+    assert controller.unsubscribe_count == fail_at - 1
+    assert not controller.snapshot_callbacks
+    assert not controller.error_callbacks
+    assert not controller.saved_callbacks
+    assert ("shutdown", 2.0) in controller.calls
+    assert window._controller is None
+    assert window._bridge is None
+
+
 def test_reconnect_reuses_controller_and_changed_disconnected_ip_replaces_safely(
     qtbot, tmp_path: Path
 ) -> None:
@@ -447,6 +582,48 @@ def test_reconnect_reuses_controller_and_changed_disconnected_ip_replaces_safely
         "connect",
         "start_background",
     ]
+
+
+def test_replacement_shutdown_failure_restores_live_bridge_and_ignores_old_queue(
+    qtbot, tmp_path: Path
+) -> None:
+    first = InspectShutdownController()
+    replacement = FakeController()
+    created: list[str] = []
+
+    def factory(plc_ip: str) -> FakeController:
+        created.append(plc_ip)
+        return first if len(created) == 1 else replacement
+
+    window = MainWindow(factory, tmp_path, initial_ip="192.0.2.27")
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.mouseClick(window.connect_button, Qt.LeftButton)
+    first.emit_snapshot(ControllerSnapshot())
+    old_bridge = window._bridge
+    first.failures["shutdown"] = ControllerStopped("旧控制器未停止")
+
+    queued = connected_snapshot(status=status_snapshot(actual_position_deg=88.0))
+    worker = Thread(target=first.emit_snapshot, args=(queued,))
+    worker.start()
+    worker.join()
+    window.ip_edit.setText("192.0.2.28")
+    window._request_connect()
+
+    assert first.bridge_active_during_shutdown is True
+    assert window._controller is first
+    assert window._bridge is old_bridge
+    assert window._bridge is not None
+    assert all((first.snapshot_callbacks, first.error_callbacks, first.saved_callbacks))
+    assert created == ["192.0.2.27"]
+    assert "旧控制器未停止" in window.message_label.text()
+
+    fresh = connected_snapshot(status=status_snapshot(actual_position_deg=99.0))
+    worker = Thread(target=first.emit_snapshot, args=(fresh,))
+    worker.start()
+    worker.join()
+    QApplication.processEvents()
+    assert window.actual_position_label.text() == "+99.000°"
 
 
 def test_start_and_other_commands_use_controller_and_domain_values(qtbot, tmp_path: Path) -> None:
@@ -584,6 +761,25 @@ def test_stop_cancels_local_start_pending_lock_without_disabling_stop(qtbot, tmp
     assert window.stop_button.isEnabled()
 
 
+def test_disconnect_clears_local_start_pending_and_recovers_connection_controls(
+    qtbot, tmp_path: Path
+) -> None:
+    window, _factory, controller = make_connected_window(qtbot, tmp_path)
+    qtbot.mouseClick(window.start_button, Qt.LeftButton)
+    assert window._start_pending
+    assert [call[0] for call in controller.calls].count("start") == 1
+
+    qtbot.mouseClick(window.disconnect_button, Qt.LeftButton)
+    assert not window._start_pending
+    controller.emit_snapshot(ControllerSnapshot())
+    qtbot.waitUntil(lambda: window.connect_button.isEnabled())
+
+    assert window.ip_edit.isEnabled()
+    assert window.connect_button.isEnabled()
+    assert not window.disconnect_button.isEnabled()
+    assert [call[0] for call in controller.calls].count("start") == 1
+
+
 def test_open_data_directory_uses_configured_path(qtbot, tmp_path: Path, monkeypatch) -> None:
     opened = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url) or True)
@@ -611,6 +807,60 @@ def test_close_reports_controller_stopped_inline_and_still_closes(qtbot, tmp_pat
     window.close()
 
     assert "控制器线程未能停止" in window.message_label.text()
+    assert not window.isVisible()
+
+
+def test_queued_old_worker_snapshot_cannot_overwrite_replacement_controller(
+    qtbot, tmp_path: Path
+) -> None:
+    window, factory, first = make_connected_window(qtbot, tmp_path)
+    first.emit_snapshot(ControllerSnapshot())
+    stale = connected_snapshot(
+        status=status_snapshot(
+            run_state=RunState.READY,
+            run_status=RunStatus.IDLE,
+            actual_position_deg=111.0,
+        )
+    )
+    worker = Thread(target=first.emit_snapshot, args=(stale,))
+    worker.start()
+    worker.join()
+
+    window.ip_edit.setText("192.0.2.99")
+    window._request_connect()
+    second = factory.controllers[1]
+    second.emit_snapshot(
+        connected_snapshot(
+            status=status_snapshot(
+                run_state=RunState.AUTO_RUNNING,
+                run_status=RunStatus.RUNNING,
+                actual_position_deg=222.0,
+            )
+        )
+    )
+    QApplication.processEvents()
+
+    assert window.actual_position_label.text() == "+222.000°"
+    assert window.run_state_label.text() == "自动运行"
+    assert not window.mode_combo.isEnabled()
+    assert not window.set_zero_button.isEnabled()
+    assert not window.power_button.isEnabled()
+
+
+def test_queued_worker_callbacks_are_ignored_after_close(qtbot, tmp_path: Path) -> None:
+    window, _factory, controller = make_connected_window(qtbot, tmp_path)
+    before_position = window.actual_position_label.text()
+    before_thread = window.last_snapshot_thread_id
+    stale = connected_snapshot(status=status_snapshot(actual_position_deg=333.0))
+    worker = Thread(target=controller.emit_snapshot, args=(stale,))
+    worker.start()
+    worker.join()
+
+    window.close()
+    QApplication.processEvents()
+
+    assert window.actual_position_label.text() == before_position
+    assert window.last_snapshot_thread_id == before_thread
     assert not window.isVisible()
 
 

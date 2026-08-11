@@ -290,3 +290,27 @@
 - 首次连接已注册回调且已排队 `connect()` 后，如果后台线程启动失败，界面会立即取消全部三个订阅、调用 2 秒有界 `shutdown()`、丢弃半初始化控制器并恢复可重试状态；清理失败会与原始错误一起显示，不会静默保留失效控制器。
 - 本地命令错误不会被下一次无错误状态轮询静默清除并重新开放启动；操作者修改 IP、模式、方向或速度后才清除该本地错误并重新计算联锁。
 - 三个回归分别先复现运行中断开被禁用、后台启动失败遗留控制器，以及轮询静默清除本地启动错误；最小修正后对应聚焦测试通过。
+
+## Task 8 独立复审修正：fail-closed 与 Qt 生命周期
+
+### 完成项
+
+- 建立精确安全空闲谓词：只有精确 `RunState.READY` 与精确 `RunStatus.IDLE` 才可能开放启动；连接状态下任何 raw/unknown/missing state 或 status 都锁定除软件 STOP 和 Disconnect 外的全部输入、命令、数据目录和高级参数。
+- Disconnect 成功入队以及控制器发布断线快照时都会清除 UI 本地 START 待确认锁，恢复 IP/Connect，不重放 START；不确定启动的真实所有权仍由 Controller 管理。
+- CSV 文案改为由 durable path 与 `download_pending` 联合推导，明确区分“未保存”“待下载或保存”“已保存，等待 PLC 确认”和“已保存”；ACK 重试完成后能恢复最终已保存状态。
+- 每次安装 ControllerBridge 分配单调世代号；替换、丢弃和关闭前先使旧世代失效，所有 queued snapshot/error/saved Qt 信号只在世代仍为当前且窗口未 closing 时应用。
+- ControllerBridge 的三个订阅改为事务化逐项注册，任何后续注册失败都会逆序取消已有订阅。窗口对未安装完成的局部 Controller 执行 2 秒有界 shutdown。
+- Controller 替换时在 shutdown 成功前保留原 bridge。shutdown 失败会给同一 bridge 分配新世代并恢复未来回调，绝不留下仍存活但无 bridge 的 Controller；首次后台启动 cleanup 自身失败也采用同一恢复原则。
+
+### 测试先行证据
+
+- SF1-SF3 新回归首先得到 `5 failed`：unknown/raw 控件未锁、READY/RUNNING 错误开放 START、CSV ACK 文案错误、Disconnect 未清本地 pending；最小修复后 5 项通过。
+- QF1 使用真实 Python worker 将旧快照排入 Qt 队列，替换/关闭后处理事件，两项首先都被旧快照覆盖并失败；加入世代号与 closing 守卫后 3 项相关线程测试通过。
+- QF2 在第 1/2/3 个订阅位置注入失败并注入 replacement shutdown 超时，首先得到 `4 failed`；事务化回滚与 bridge 恢复后 4 项通过。
+- 扩展回归先复现首次后台启动与 cleanup 同时失败时 Controller 被丢弃且无 bridge；修复后该 Controller/bridge 保持绑定并能继续接收工作线程错误。
+- 当前聚焦 UI 为 `36 passed`，完整 PC 套件为 `315 passed`；全部使用 offscreen Qt、假 Controller/factory、真实本地 Python worker 线程和临时目录。
+
+### 限制
+
+- 未访问网络、PLC、AutoShop、伺服或硬件；queued-callback 验证的是 Qt/Python 本地线程边界，不代表现场 PLC 通信或机械安全验证。
+- 软件停止和通信断开触发的心跳保护仍不是实体急停或安全等级功能。

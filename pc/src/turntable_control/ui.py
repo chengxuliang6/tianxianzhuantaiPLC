@@ -55,22 +55,52 @@ _RUN_STATUS_LABELS = {
 class ControllerBridge(QObject):
     """Marshal controller worker callbacks into the Qt object's GUI thread."""
 
-    snapshot_received = Signal(object)
-    error_received = Signal(str)
-    saved_received = Signal(object)
+    snapshot_received = Signal(int, object)
+    error_received = Signal(int, str)
+    saved_received = Signal(int, object)
 
-    def __init__(self, controller: object) -> None:
+    def __init__(self, controller: object, generation: int) -> None:
         super().__init__()
-        self._unsubscribers = [
-            controller.on_snapshot(self.snapshot_received.emit),  # type: ignore[attr-defined]
-            controller.on_error(self.error_received.emit),  # type: ignore[attr-defined]
-            controller.on_run_saved(self.saved_received.emit),  # type: ignore[attr-defined]
-        ]
+        self._generation = generation
+        self._unsubscribers: list[Callable[[], None]] = []
+        registrations = (
+            (controller.on_snapshot, self._forward_snapshot),  # type: ignore[attr-defined]
+            (controller.on_error, self._forward_error),  # type: ignore[attr-defined]
+            (controller.on_run_saved, self._forward_saved),  # type: ignore[attr-defined]
+        )
+        try:
+            for register, callback in registrations:
+                self._unsubscribers.append(register(callback))
+        except Exception:
+            self._unsubscribe_all(suppress=True)
+            raise
+
+    def _forward_snapshot(self, snapshot: object) -> None:
+        self.snapshot_received.emit(self._generation, snapshot)
+
+    def _forward_error(self, message: str) -> None:
+        self.error_received.emit(self._generation, message)
+
+    def _forward_saved(self, path: object) -> None:
+        self.saved_received.emit(self._generation, path)
+
+    def set_generation(self, generation: int) -> None:
+        self._generation = generation
 
     def close(self) -> None:
+        self._unsubscribe_all(suppress=False)
+
+    def _unsubscribe_all(self, *, suppress: bool) -> None:
         unsubscribers, self._unsubscribers = self._unsubscribers, []
-        for unsubscribe in unsubscribers:
-            unsubscribe()
+        first_error: Exception | None = None
+        for unsubscribe in reversed(unsubscribers):
+            try:
+                unsubscribe()
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None and not suppress:
+            raise first_error
 
 
 class MainWindow(QMainWindow):
@@ -89,6 +119,7 @@ class MainWindow(QMainWindow):
         self._controller: object | None = None
         self._controller_ip: str | None = None
         self._bridge: ControllerBridge | None = None
+        self._controller_generation = 0
         self._snapshot = ControllerSnapshot()
         self._start_pending = False
         self._local_command_error = False
@@ -303,18 +334,25 @@ class MainWindow(QMainWindow):
                 return
         first_connect = self._controller is None
         if first_connect:
+            controller: object | None = None
             try:
                 controller = self._controller_factory(plc_ip)
-                bridge = ControllerBridge(controller)
+                generation = self._invalidate_generation()
+                bridge = ControllerBridge(controller, generation)
             except Exception as error:
-                self._show_message(str(error))
+                message = str(error)
+                if controller is not None:
+                    cleanup_error = self._shutdown_uninstalled_controller(controller)
+                    if cleanup_error:
+                        message = f"{message}；清理失败：{cleanup_error}"
+                self._show_message(message)
                 return
             self._controller = controller
             self._controller_ip = plc_ip
             self._bridge = bridge
-            bridge.snapshot_received.connect(self.apply_snapshot)
-            bridge.error_received.connect(self._apply_error)
-            bridge.saved_received.connect(self.apply_saved_path)
+            bridge.snapshot_received.connect(self._apply_bridge_snapshot)
+            bridge.error_received.connect(self._apply_bridge_error)
+            bridge.saved_received.connect(self._apply_bridge_saved)
             snapshot = getattr(controller, "snapshot", None)
             if isinstance(snapshot, ControllerSnapshot):
                 self.apply_snapshot(snapshot)
@@ -336,7 +374,9 @@ class MainWindow(QMainWindow):
         self._refresh_controls()
 
     def _request_disconnect(self) -> None:
-        self._invoke_controller("disconnect")
+        if self._invoke_controller("disconnect"):
+            self._start_pending = False
+            self._refresh_controls()
 
     def _request_start(self) -> None:
         if self._controller is None:
@@ -428,12 +468,33 @@ class MainWindow(QMainWindow):
         self._start_pending = False
         self._show_message(message)
 
+    def _apply_bridge_snapshot(self, generation: int, snapshot: object) -> None:
+        if self._bridge_event_is_current(generation):
+            self.apply_snapshot(snapshot)  # type: ignore[arg-type]
+
+    def _apply_bridge_error(self, generation: int, message: str) -> None:
+        if self._bridge_event_is_current(generation):
+            self._apply_error(message)
+
+    def _apply_bridge_saved(self, generation: int, path: object) -> None:
+        if self._bridge_event_is_current(generation):
+            self.apply_saved_path(path)  # type: ignore[arg-type]
+
+    def _bridge_event_is_current(self, generation: int) -> bool:
+        return not self._closing and generation == self._controller_generation
+
+    def _invalidate_generation(self) -> int:
+        self._controller_generation += 1
+        return self._controller_generation
+
     def apply_snapshot(self, snapshot: ControllerSnapshot) -> None:
         """Render one immutable controller snapshot on the GUI thread."""
         if not isinstance(snapshot, ControllerSnapshot):
             raise TypeError("snapshot must be a ControllerSnapshot")
         self.last_snapshot_thread_id = get_ident()
         self._snapshot = snapshot
+        if not snapshot.connected:
+            self._start_pending = False
         if self._start_pending and (
             snapshot.last_error is not None
             or (
@@ -483,17 +544,21 @@ class MainWindow(QMainWindow):
             self.run_status_label.setText(self._enum_label(status.run_status, _RUN_STATUS_LABELS))
             self.event_count_label.setText(str(status.event_count))
         self.test_id_label.setText(snapshot.active_test_id or "—")
-        if snapshot.download_pending:
-            self.csv_status_label.setText("待下载或保存")
-        elif self._saved_path is None:
-            self.csv_status_label.setText("未保存")
+        self._refresh_csv_status()
         self._refresh_controls()
 
     def apply_saved_path(self, path: str | Path) -> None:
         """Show a durable CSV path only after the saved callback fires."""
         self._saved_path = Path(path)
         self.csv_path_label.setText(str(self._saved_path))
-        self.csv_status_label.setText("已保存")
+        self._refresh_csv_status()
+
+    def _refresh_csv_status(self) -> None:
+        if self._saved_path is not None:
+            text = "已保存，等待 PLC 确认" if self._snapshot.download_pending else "已保存"
+        else:
+            text = "待下载或保存" if self._snapshot.download_pending else "未保存"
+        self.csv_status_label.setText(text)
 
     @staticmethod
     def _enum_label(raw: object, labels: dict[object, str]) -> str:
@@ -505,8 +570,11 @@ class MainWindow(QMainWindow):
         snapshot = self._snapshot
         status = snapshot.status
         run_state = None if status is None else status.run_state
+        run_status = None if status is None else status.run_status
+        exact_known_status = type(run_state) is RunState and type(run_status) is RunStatus
+        unknown_connected = snapshot.connected and not exact_known_status
         motion_active = type(run_state) is RunState and run_state in _MOTION_ACTIVE_STATES
-        locked = motion_active or self._start_pending
+        locked = motion_active or self._start_pending or unknown_connected
         self.ip_edit.setEnabled(not locked)
         self.connect_button.setEnabled(not locked and not snapshot.connected)
         self.disconnect_button.setEnabled(snapshot.connected)
@@ -518,12 +586,17 @@ class MainWindow(QMainWindow):
         self.power_button.setEnabled(connected_action)
         self.reset_button.setEnabled(connected_action)
         self.advanced_toggle.setEnabled(not locked)
+        self.open_data_button.setEnabled(not unknown_connected)
         self.retry_button.setVisible(snapshot.download_pending)
         self.retry_button.setEnabled(snapshot.connected and snapshot.download_pending and not locked)
-        exact_ready = status is not None and status.run_state is RunState.READY
+        exact_safe_idle = (
+            status is not None
+            and status.run_state is RunState.READY
+            and status.run_status is RunStatus.IDLE
+        )
         start_allowed = (
             snapshot.connected
-            and exact_ready
+            and exact_safe_idle
             and bool(status.status_flags & STATUS_ZERO_VALID)
             and bool(status.status_flags & STATUS_POWERED)
             and not bool(status.status_flags & STATUS_BUFFER_READY)
@@ -535,42 +608,68 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(True)
 
     def _dispose_controller(self) -> bool:
+        self._invalidate_generation()
         bridge = self._bridge
         controller = self._controller
-        if bridge is not None:
-            bridge.close()
-        self._bridge = None
         if controller is not None:
             try:
                 controller.shutdown(timeout=2.0)  # type: ignore[attr-defined]
             except Exception as error:
+                if bridge is not None:
+                    bridge.set_generation(self._invalidate_generation())
                 self._show_message(str(error))
                 return False
+        close_error: Exception | None = None
+        if bridge is not None:
+            try:
+                bridge.close()
+            except Exception as error:
+                close_error = error
+        self._bridge = None
         self._controller = None
         self._controller_ip = None
         self._snapshot = ControllerSnapshot()
         self.apply_snapshot(self._snapshot)
+        if close_error is not None:
+            self._show_message(str(close_error))
         return True
 
+    @staticmethod
+    def _shutdown_uninstalled_controller(controller: object) -> str | None:
+        try:
+            controller.shutdown(timeout=2.0)  # type: ignore[attr-defined]
+        except Exception as error:
+            return str(error)
+        return None
+
     def _discard_failed_first_controller(self) -> str | None:
-        bridge, self._bridge = self._bridge, None
-        controller, self._controller = self._controller, None
-        self._controller_ip = None
-        if bridge is not None:
-            bridge.close()
-        cleanup_error: str | None = None
+        self._invalidate_generation()
+        bridge = self._bridge
+        controller = self._controller
         if controller is not None:
             try:
                 controller.shutdown(timeout=2.0)  # type: ignore[attr-defined]
             except Exception as error:
-                cleanup_error = str(error)
+                if bridge is not None:
+                    bridge.set_generation(self._invalidate_generation())
+                return str(error)
+        close_error: str | None = None
+        if bridge is not None:
+            try:
+                bridge.close()
+            except Exception as error:
+                close_error = str(error)
+        self._bridge = None
+        self._controller = None
+        self._controller_ip = None
         self._snapshot = ControllerSnapshot()
         self.apply_snapshot(self._snapshot)
-        return cleanup_error
+        return close_error
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt API name
         if not self._closing:
             self._closing = True
+            self._invalidate_generation()
             bridge, self._bridge = self._bridge, None
             controller, self._controller = self._controller, None
             self._controller_ip = None
