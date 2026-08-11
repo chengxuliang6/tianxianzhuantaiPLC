@@ -98,6 +98,19 @@ def test_connect_probes_before_enabling_writes_and_uses_keyword_device_id(fake_t
     assert fake_transport.write_calls == []
 
 
+def test_connect_exposes_the_verified_command_side_start_sequence(fake_transport: FakeTransport) -> None:
+    from turntable_control.modbus_client import ProtocolMismatch
+
+    fake_transport.memory[Register.START_SEQ] = 41
+    client = make_client(fake_transport)
+    connect(client)
+    assert client.start_command_seq == 41
+
+    client.close()
+    with pytest.raises(ProtocolMismatch):
+        _ = client.start_command_seq
+
+
 @pytest.mark.parametrize(
     ("address", "value"),
     [(Register.PROTOCOL_VERSION, 2), (Register.WORD_ORDER_PROBE_LO, 0x7856)],

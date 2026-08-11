@@ -155,6 +155,13 @@ class TurntableModbusClient:
         self._sequences: dict[Register, int] = {}
         self._time_sync_sequence = 0
 
+    @property
+    def start_command_seq(self) -> int:
+        """Return the command-side D1003 value observed by this verified session."""
+        with self._lock:
+            self._require_verified()
+            return self._sequences[Register.START_SEQ]
+
     def connect(self) -> None:
         """Open a session and perform the required read-only protocol probe."""
         with self._lock:

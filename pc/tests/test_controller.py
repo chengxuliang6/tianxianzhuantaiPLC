@@ -50,6 +50,7 @@ class FakeClient:
         self.status = ready_status()
         self.calls: list[tuple[object, ...]] = []
         self.start_seq = 0
+        self.observed_start_command_seq = 0
         self.stop_seq = 0
         self.sync_seq = 0
         self.fail_next: dict[str, Exception] = {}
@@ -67,6 +68,10 @@ class FakeClient:
     def connect(self) -> None:
         self.calls.append(("connect",))
         self._fail("connect")
+
+    @property
+    def start_command_seq(self) -> int:
+        return self.observed_start_command_seq
 
     def close(self) -> None:
         self.calls.append(("close",))
@@ -87,6 +92,7 @@ class FakeClient:
         self.start_seq = (self.start_seq + 1) & 0xFFFF
         self.calls.append(("send_start", mode, direction, speed_index))
         self._fail("send_start")
+        self.observed_start_command_seq = self.start_seq
         return self.start_seq
 
     def send_stop(self) -> int:
@@ -232,6 +238,71 @@ def test_stop_has_priority_and_cancels_a_pending_start() -> None:
     assert client.calls == [("send_stop",)]
 
 
+def test_queued_start_stop_barrier_blocks_replacement_until_stop_ack() -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.stop()
+    controller.process_once()
+
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    client.status = ready_status(stop_ack_seq=1)
+    clock.advance(100)
+    controller.process_once()
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("send_stop") == 1
+    assert [call[0] for call in client.calls].count("send_start") == 1
+
+
+def test_stop_only_barrier_clears_for_ready_retained_terminal_status() -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    client.status = ready_status(run_status=RunStatus.AUTOMATIC_ABORTED)
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+
+    controller.stop()
+    controller.process_once()
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    client.status = ready_status(
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        stop_ack_seq=1,
+    )
+    clock.advance(100)
+    controller.process_once()
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("send_stop") == 1
+    assert [call[0] for call in client.calls].count("send_start") == 1
+
+
+def test_disconnect_clears_unsent_queued_start_and_stop_barrier() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.stop()
+    controller.disconnect()
+    controller.process_once()
+    client.status = ready_status()
+    controller.connect()
+    controller.process_once()
+
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    names = [call[0] for call in client.calls]
+    assert "send_stop" not in names
+    assert names.count("send_start") == 1
+
+
 def test_only_one_start_can_be_queued_or_in_flight_before_plc_confirmation() -> None:
     client = FakeClient()
     controller = make_controller(client)
@@ -273,21 +344,319 @@ def test_exact_plc_start_confirmation_releases_pending_guard() -> None:
     assert ("send_start", Mode.MANUAL, Direction.CCW, 4) in client.calls
 
 
-def test_stop_clears_an_in_flight_start_guard_without_replaying_it() -> None:
+def test_incoherent_exact_start_ack_does_not_release_issued_guard() -> None:
     client = FakeClient()
-    controller = make_controller(client)
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(
+        run_state=RunState.MANUAL_RUNNING,
+        run_status=RunStatus.RUNNING,
+        start_ack_seq=1,
+        run_start_plc_ms=123,
+    )
+    clock.advance(100)
+
+    controller.process_once()
+
+    assert controller._issued_start_seq == 1
+    assert "state" in (controller.snapshot.last_error or "")
+
+
+def test_stop_keeps_an_issued_start_cancelling_until_both_acks_and_stopped_state() -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
     connect_controller(controller)
     controller.start(Mode.AUTO, Direction.CW, 1.0)
     controller.process_once()
 
     controller.stop()
     controller.process_once()
-    client.status = ready_status()
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    client.status = ready_status(start_ack_seq=1, stop_ack_seq=1)
+    clock.advance(100)
+    controller.process_once()
     controller.start(Mode.MANUAL, Direction.CCW, 5.0)
     controller.process_once()
 
     assert [call[0] for call in client.calls].count("send_start") == 2
     assert [call[0] for call in client.calls].count("send_stop") == 1
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ready_status(start_ack_seq=0, stop_ack_seq=1),
+        ready_status(start_ack_seq=1, stop_ack_seq=0),
+        ready_status(
+            run_state=RunState.STOPPING,
+            run_status=RunStatus.AUTOMATIC_ABORTED,
+            start_ack_seq=1,
+            stop_ack_seq=1,
+        ),
+    ],
+    ids=("missing-start-ack", "missing-stop-ack", "not-stopped"),
+)
+def test_issued_start_cancellation_blocks_replacement_until_full_barrier(
+    status: StatusSnapshot,
+) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    controller.stop()
+    controller.process_once()
+    client.status = status
+    clock.advance(100)
+    controller.process_once()
+
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+
+    assert [call[0] for call in client.calls].count("send_start") == 1
+
+
+def test_confirmed_running_stop_clears_barrier_after_terminal_save_and_ack(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        run_status=RunStatus.RUNNING,
+        start_ack_seq=1,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+    controller.stop()
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        stop_ack_seq=1,
+        event_count=1,
+        event_generation=40,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+    client.status = ready_status(
+        start_ack_seq=1,
+        stop_ack_seq=1,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("save_run") == 1
+    assert [call[0] for call in client.calls].count("acknowledge_buffer") == 1
+    assert [call[0] for call in client.calls].count("send_start") == 2
+
+
+def test_confirmed_running_stop_rejects_ready_idle_without_terminal_buffer() -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        run_status=RunStatus.RUNNING,
+        start_ack_seq=1,
+        run_start_plc_ms=123,
+    )
+    clock.advance(100)
+    controller.process_once()
+    controller.stop()
+    controller.process_once()
+    client.status = ready_status(start_ack_seq=1, stop_ack_seq=1)
+    clock.advance(100)
+    controller.process_once()
+
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+
+    assert controller._run_session is not None
+    assert controller._start_cancellation is not None
+    assert "terminal" in (controller.snapshot.last_error or "")
+
+
+def test_stop_during_running_status_publish_keeps_confirmed_session_identity() -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connected = Event()
+    issued = Event()
+    publish_entered = Event()
+    release_publish = Event()
+    armed = False
+    controller.on_snapshot(lambda snapshot: connected.set() if snapshot.connected else None)
+    controller.on_snapshot(lambda snapshot: issued.set() if snapshot.active_test_id else None)
+    original_publish = controller._publish
+
+    def blocking_publish(snapshot: ControllerSnapshot) -> None:
+        if armed and snapshot.status is client.status and snapshot.status.run_status is RunStatus.RUNNING:
+            publish_entered.set()
+            assert release_publish.wait(1.0)
+        original_publish(snapshot)
+
+    controller._publish = blocking_publish  # type: ignore[method-assign]
+    controller.connect()
+    controller.start_background()
+    assert connected.wait(1.0)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller._wake.set()
+    assert issued.wait(1.0)
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        run_status=RunStatus.RUNNING,
+        start_ack_seq=1,
+        run_start_plc_ms=123,
+    )
+    armed = True
+    clock.advance(100)
+    controller._wake.set()
+    assert publish_entered.wait(1.0)
+
+    try:
+        controller.stop()
+        assert controller._start_cancellation is not None
+        assert controller._start_cancellation.start_seq == 1
+        assert controller._start_cancellation.mode is Mode.AUTO
+    finally:
+        release_publish.set()
+        controller.shutdown(timeout=1.0)
+
+
+def test_stop_cannot_observe_half_applied_explicit_start_rejection() -> None:
+    clear_entered = Event()
+    release_clear = Event()
+
+    class BlockingSessionClearController(TurntableController):
+        block_session_clear = False
+
+        def __setattr__(self, name: str, value: object) -> None:
+            super().__setattr__(name, value)
+            if name == "_run_session" and value is None and self.block_session_clear:
+                self.block_session_clear = False
+                clear_entered.set()
+                assert release_clear.wait(1.0)
+
+    client = FakeClient()
+    clock = FakeClock()
+    controller = BlockingSessionClearController(
+        client,
+        FakeStore(),
+        ClockSynchronizer(),
+        epoch_ms=lambda: clock.epoch,
+        monotonic_ms=lambda: clock.monotonic,
+    )
+    connected = Event()
+    issued = Event()
+    controller.on_snapshot(lambda snapshot: connected.set() if snapshot.connected else None)
+    controller.on_snapshot(lambda snapshot: issued.set() if snapshot.active_test_id else None)
+    controller.connect()
+    controller.start_background()
+    assert connected.wait(1.0)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller._wake.set()
+    assert issued.wait(1.0)
+    client.status = ready_status(
+        run_state=RunState.FAULT,
+        run_status=RunStatus.FAULTED,
+        fault_code=10,
+        start_ack_seq=1,
+    )
+    controller.block_session_clear = True
+    clock.advance(100)
+    controller._wake.set()
+    assert clear_entered.wait(1.0)
+    stop_errors: list[Exception] = []
+    stop_done = Event()
+
+    def request_stop() -> None:
+        try:
+            controller.stop()
+        except Exception as error:
+            stop_errors.append(error)
+        finally:
+            stop_done.set()
+
+    thread = Thread(target=request_stop)
+    thread.start()
+    try:
+        assert not stop_done.wait(0.1)
+    finally:
+        release_clear.set()
+        thread.join(1.0)
+        controller.shutdown(timeout=1.0)
+
+    assert stop_done.is_set()
+    assert stop_errors == []
+
+
+def test_repeated_stop_cannot_lose_barrier_during_old_ack_reconciliation() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    controller.stop()
+    controller.process_once()
+    validation_entered = Event()
+    release_validation = Event()
+    original_validator = controller._terminal_coherence_error
+
+    def blocking_validator(status: StatusSnapshot, mode: Mode) -> str | None:
+        validation_entered.set()
+        assert release_validation.wait(1.0)
+        return original_validator(status, mode)
+
+    controller._terminal_coherence_error = blocking_validator  # type: ignore[method-assign]
+    old_ack = ready_status(
+        status_flags=0x000B,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        start_ack_seq=1,
+        stop_ack_seq=1,
+    )
+    reconcile_thread = Thread(target=lambda: controller._reconcile_start_cancellation(old_ack))
+    reconcile_thread.start()
+    assert validation_entered.wait(1.0)
+    stop_done = Event()
+    stop_thread = Thread(target=lambda: (controller.stop(), stop_done.set()))
+    stop_thread.start()
+    try:
+        assert not stop_done.wait(0.1)
+    finally:
+        release_validation.set()
+        reconcile_thread.join(1.0)
+        stop_thread.join(1.0)
+
+    assert stop_done.is_set()
+    controller.process_once()
+    assert controller._start_cancellation is not None
+    assert controller._start_cancellation.stop_seq == 2
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
 
 
 @pytest.mark.parametrize(
@@ -368,6 +737,75 @@ def test_fresh_start_recheck_retains_a_new_terminal_buffer_without_sending_start
     assert controller.snapshot.download_pending
     assert "send_start" not in [call[0] for call in client.calls]
     assert "acknowledge_buffer" not in [call[0] for call in client.calls]
+
+
+@pytest.mark.parametrize("priority_action", ["stop", "disconnect", "shutdown"])
+def test_fresh_status_callback_priority_action_cancels_exact_pending_start(
+    priority_action: str,
+) -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    armed = False
+
+    def priority_callback(snapshot: ControllerSnapshot) -> None:
+        nonlocal armed
+        if not armed or snapshot.status is not client.status:
+            return
+        armed = False
+        getattr(controller, priority_action)()
+
+    controller.on_snapshot(priority_callback)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    armed = True
+    client.calls.clear()
+
+    controller.process_once()
+
+    if priority_action == "shutdown":
+        assert [call[0] for call in client.calls] == ["read_status", "close"]
+        expected = "close"
+    else:
+        assert [call[0] for call in client.calls] == ["read_status"]
+        controller.process_once()
+        expected = "send_stop" if priority_action == "stop" else "close"
+    assert expected in [call[0] for call in client.calls]
+    assert "send_start" not in [call[0] for call in client.calls]
+
+
+def test_concurrent_stop_at_fresh_status_barrier_prevents_start_write() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connected = Event()
+    fresh_callback_entered = Event()
+    release_fresh_callback = Event()
+    armed = False
+
+    def callback(snapshot: ControllerSnapshot) -> None:
+        if snapshot.connected:
+            connected.set()
+        if armed and snapshot.status is client.status:
+            fresh_callback_entered.set()
+            assert release_fresh_callback.wait(1.0)
+
+    controller.on_snapshot(callback)
+    controller.connect()
+    controller.start_background()
+    assert connected.wait(1.0)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    armed = True
+    client.calls.clear()
+    controller._wake.set()
+    assert fresh_callback_entered.wait(1.0)
+
+    controller.stop()
+    client.call_event.clear()
+    release_fresh_callback.set()
+    assert client.call_event.wait(1.0)
+    controller.shutdown(timeout=1.0)
+
+    assert "send_start" not in [call[0] for call in client.calls]
+    assert [call[0] for call in client.calls].count("send_stop") == 1
 
 
 def test_disconnect_clears_pending_commands_and_reconnect_never_replays_start() -> None:
@@ -512,6 +950,7 @@ def test_exact_unknown_start_reconciles_terminal_buffer_without_replaying_motion
         run_status=RunStatus.AUTOMATIC_ABORTED,
         run_start_plc_ms=100,
     )
+    client.observed_start_command_seq = 1
 
     controller.connect()
     controller.process_once()
@@ -523,17 +962,39 @@ def test_exact_unknown_start_reconciles_terminal_buffer_without_replaying_motion
     assert not controller.snapshot.download_pending
 
 
-@pytest.mark.parametrize("observed_ack", [0, 1])
-def test_exact_unknown_start_clears_when_plc_is_ready_idle_without_buffer(
-    observed_ack: int,
-) -> None:
+def test_exact_unknown_start_reconciles_mode_matching_running_state_without_replay() -> None:
     client = FakeClient()
     controller = make_controller(client)
     connect_controller(controller)
     client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
     controller.start(Mode.AUTO, Direction.CW, 1.0)
     controller.process_once()
-    client.status = ready_status(start_ack_seq=observed_ack, run_status=RunStatus.IDLE)
+    client.observed_start_command_seq = 1
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        start_ack_seq=1,
+        run_status=RunStatus.RUNNING,
+        run_start_plc_ms=123,
+    )
+
+    controller.connect()
+    controller.process_once()
+
+    assert controller._uncertain_start is None
+    assert controller._run_session is not None
+    assert controller._run_session.run_start_plc_ms == 123
+    assert [call[0] for call in client.calls].count("send_start") == 1
+
+
+def test_exact_unknown_start_clears_only_when_command_was_definitely_not_written() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.observed_start_command_seq = 0
+    client.status = ready_status(start_ack_seq=0, run_status=RunStatus.IDLE)
 
     controller.connect()
     controller.process_once()
@@ -541,6 +1002,73 @@ def test_exact_unknown_start_clears_when_plc_is_ready_idle_without_buffer(
     assert [call[0] for call in client.calls].count("send_start") == 1
     controller.start(Mode.MANUAL, Direction.CCW, 5.0)
     controller.process_once()
+    assert [call[0] for call in client.calls].count("send_start") == 2
+
+
+def test_exact_unknown_start_stays_blocked_while_command_is_pending_in_d1003() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.observed_start_command_seq = 1
+    client.status = ready_status(start_ack_seq=0, run_status=RunStatus.IDLE)
+
+    controller.connect()
+    controller.process_once()
+
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    assert [call[0] for call in client.calls].count("send_start") == 1
+    assert "D1003" in (controller.snapshot.last_error or "")
+
+
+def test_exact_unknown_start_treats_exact_ack_ready_idle_as_conflict() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.observed_start_command_seq = 1
+    client.status = ready_status(start_ack_seq=1, run_status=RunStatus.IDLE)
+
+    controller.connect()
+    controller.process_once()
+
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    assert [call[0] for call in client.calls].count("send_start") == 1
+    assert "\u4eba\u5de5\u5bf9\u8d26" in (controller.snapshot.last_error or "")
+
+
+def test_exact_unknown_start_clears_on_explicit_plc_start_rejection() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.observed_start_command_seq = 1
+    client.status = ready_status(
+        run_state=RunState.FAULT,
+        fault_code=10,
+        start_ack_seq=1,
+        run_status=RunStatus.FAULTED,
+    )
+
+    controller.connect()
+    controller.process_once()
+    assert controller._uncertain_start is None
+    client.status = ready_status(start_ack_seq=1)
+    controller.disconnect()
+    controller.process_once()
+    controller.connect()
+    controller.process_once()
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
     assert [call[0] for call in client.calls].count("send_start") == 2
 
 
@@ -559,6 +1087,7 @@ def test_exact_unknown_start_conflict_remains_blocked_for_manual_reconciliation(
         run_status=RunStatus.AUTOMATIC_ABORTED,
         run_start_plc_ms=100,
     )
+    client.observed_start_command_seq = 1
 
     controller.connect()
     controller.process_once()
@@ -591,6 +1120,7 @@ def test_exact_unknown_start_rejects_torn_terminal_and_running_state(tmp_path: P
         run_status=RunStatus.AUTOMATIC_ABORTED,
         run_start_plc_ms=100,
     )
+    client.observed_start_command_seq = 1
 
     controller.connect()
     controller.process_once()
@@ -757,6 +1287,45 @@ def test_known_session_rejects_terminal_buffer_with_running_state(tmp_path: Path
     assert "acknowledge_buffer" not in names
     assert controller.snapshot.download_pending
     assert "state" in (controller.snapshot.last_error or "")
+
+
+@pytest.mark.parametrize(
+    ("mode", "terminal_status"),
+    [
+        (Mode.AUTO, RunStatus.MANUAL_STOPPED),
+        (Mode.MANUAL, RunStatus.AUTOMATIC_ABORTED),
+    ],
+)
+def test_terminal_status_must_be_compatible_with_session_mode(
+    tmp_path: Path, mode: Mode, terminal_status: RunStatus
+) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(mode, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        run_status=terminal_status,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=39,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+
+    controller.process_once()
+
+    names = [call[0] for call in client.calls]
+    assert "save_run" not in names
+    assert "acknowledge_buffer" not in names
+    assert controller.snapshot.download_pending
+    assert "mode" in (controller.snapshot.last_error or "")
 
 
 @pytest.mark.parametrize("terminal_status", [RunStatus.COMPLETED, RunStatus.AUTOMATIC_ABORTED])
@@ -946,8 +1515,9 @@ def test_ack_uncertainty_reconnects_and_reuses_durable_file_without_resave(tmp_p
         {"event_count": 2},
         {"run_status": RunStatus.COMMUNICATION_ABORTED},
         {"run_start_plc_ms": 101},
+        {"run_state": RunState.AUTO_RUNNING},
     ],
-    ids=("start-ack", "generation", "event-count", "terminal-status", "run-start-tick"),
+    ids=("start-ack", "generation", "event-count", "terminal-status", "run-start-tick", "run-state"),
 )
 def test_ack_recovery_refuses_any_buffer_fingerprint_mismatch(
     tmp_path: Path, mismatch: dict[str, object]
@@ -1205,6 +1775,37 @@ def test_background_mode_is_rejected_after_deterministic_pump_claims_io_thread()
 
     controller.shutdown(timeout=1.0)
     assert len(set(client.io_threads)) == 1
+
+
+def test_background_mode_is_reserved_before_worker_can_claim_io_thread() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    caller_thread = get_ident()
+    worker_entered = Event()
+    release_worker = Event()
+    connected = Event()
+    controller.on_snapshot(lambda snapshot: connected.set() if snapshot.connected else None)
+    original_worker_loop = controller._worker_loop
+
+    def delayed_worker_loop() -> None:
+        worker_entered.set()
+        assert release_worker.wait(1.0)
+        original_worker_loop()
+
+    controller._worker_loop = delayed_worker_loop  # type: ignore[method-assign]
+    controller.connect()
+    controller.start_background()
+    assert worker_entered.wait(1.0)
+    try:
+        with pytest.raises(ControllerStopped):
+            controller.process_once()
+    finally:
+        release_worker.set()
+
+    assert connected.wait(1.0)
+    controller.shutdown(timeout=1.0)
+    assert len(set(client.io_threads)) == 1
+    assert client.io_threads[0] != caller_thread
 
 
 def test_shutdown_in_deterministic_pump_mode_closes_through_the_pump() -> None:

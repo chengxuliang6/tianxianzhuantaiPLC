@@ -226,3 +226,19 @@
 - Review regressions reproduced unsafe ACK of mismatched evidence, ambiguous START ownership, incomplete completed runs, stale fresh-status publication, an escaping backward-clock sample, and both deterministic/background close failures before their corresponding fixes. The lifecycle group initially reported five failures plus one passing non-vacuous worker test; the added published-evidence pair also failed by attempting a second ACK before the full local fingerprint check.
 - Fresh final verification passed 196 focused controller/protocol/storage/time tests and all 251 PC tests; source compilation and Git whitespace checks also passed. An independent read-only code review reported no remaining Critical, Important, or Minor findings.
 - All regression and verification runs used only fake transports, fake clients/stores, injected clocks, and temporary local files. No PLC, network endpoint, AutoShop session, servo, or hardware was accessed or written.
+
+## Task 7 final-review remediation: serialized safety boundaries
+
+### Completed work
+
+- Exposed the verified command-side `D1003 START_SEQ` from each Modbus session and reconciled uncertain START outcomes against both D1003 and `START_ACK_SEQ`. A still-pending D1003 value remains blocked; only proof that the sequence was not written or the PLC's explicit `FAULT_START_REJECTED` contract clears it, while coherent exact running/terminal evidence rebuilds the local session without replay.
+- Centralized terminal coherence across uncertain reconciliation, normal save, and durable ACK recovery. The durable fingerprint now includes `run_state`; terminal state must be READY except FAULTED/FAULT, and MANUAL_STOPPED/AUTOMATIC_ABORTED must match the session mode.
+- Added a lock-linearized final START check after fresh-status callbacks. Shutdown, STOP, disconnect, or replacement/cancellation of the exact pending command wins before START I/O; the lock remains held through the write boundary so later priority requests order after an already-issued command.
+- Added an atomic deterministic/background I/O mode reservation. Background ownership is reserved before thread start, external pump calls are rejected without killing the worker, and finalization never closes the client from a thread that failed ownership.
+- Split queued, issued, confirmed-active, and cancelling START state. STOP immediately removes a queued START but retains a stop-only barrier until STOP ACK plus a coherent idle/retained-terminal state. A pre-ACK issued START additionally requires its exact START ACK; a confirmed active run can clear only from exact acknowledgements plus a mode-compatible terminal buffer. Repeated STOP requests retain or replace the barrier atomically so an older ACK cannot expose a replacement START.
+
+### Test-first evidence and constraints
+
+- R1 RED cases exposed the missing client command-side sequence and premature clearing for D1003-pending and exact-ACK/READY-IDLE snapshots. R2 RED cases saved impossible mode/status pairs and ACKed a recovery snapshot with mismatched run state. R3 callback and barrier tests reproduced START after STOP/disconnect. R4 reproduced caller-side pump ownership after background reservation. R5 reproduced replacement START before both acknowledgements and stopped state.
+- Fresh final verification passed 220 focused controller/protocol/storage/time tests and all 275 PC tests; source compilation and Git whitespace checks passed. The independent read-only final review reran 168 focused tests and all 275 PC tests and reported no remaining Critical, Important, or Minor findings.
+- All tests use in-memory fakes, injected clocks/barriers, and temporary local files. No PLC, network endpoint, AutoShop session, servo, or hardware was accessed or written.
