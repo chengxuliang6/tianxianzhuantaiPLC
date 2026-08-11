@@ -167,11 +167,12 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
     events = tuple(run.events)
     if not 1 <= len(events) <= 360:
         raise CsvSaveError("event count must be in 1..360")
+    if metadata.mode is Mode.AUTO and metadata.run_status is RunStatus.COMPLETED and len(events) != 360:
+        raise CsvSaveError("AUTO COMPLETED exports must contain exactly 360 events")
     best = synchronizer.best_sample
     if best is None:
         raise CsvSaveError("a clock sample is required before export")
 
-    previous_angle = 0
     previous_elapsed = -1
     previous_epoch: int | None = None
     rows: list[dict[str, str]] = []
@@ -182,8 +183,8 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
         elapsed = getattr(event, "elapsed_ms", None)
         if type(sequence) is not int or sequence != expected_sequence:
             raise CsvSaveError("event sequences must be exactly 1..N")
-        if type(travel_angle) is not int or not 1 <= travel_angle <= 360 or travel_angle <= previous_angle:
-            raise CsvSaveError("event travel angles must strictly increase within 1..360")
+        if type(travel_angle) is not int or travel_angle != expected_sequence:
+            raise CsvSaveError("event travel angles must equal sequences exactly within 1..360")
         if type(elapsed) is not int or not 0 <= elapsed <= _U32_MAX or elapsed < previous_elapsed:
             raise CsvSaveError("event elapsed values must be nondecreasing raw u32 values")
         if type(position) not in (int, float) or isinstance(position, bool) or not math.isfinite(position):
@@ -219,7 +220,6 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
                 "china_timestamp": _timestamp(epoch_ms, _CHINA_TZ),
             }
         )
-        previous_angle = travel_angle
         previous_elapsed = elapsed
         previous_epoch = epoch_ms
     return metadata, rows

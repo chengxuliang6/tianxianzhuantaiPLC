@@ -25,6 +25,22 @@ class ProtocolMismatch(CommunicationError):
     """The connected PLC does not implement the expected register contract."""
 
 
+class StartNotIssued(CommunicationError):
+    """START_SEQ was definitely not written, although earlier parameter writes may be uncertain."""
+
+    def __init__(self, message: str, start_seq: int) -> None:
+        super().__init__(message)
+        self.start_seq = start_seq
+
+
+class StartOutcomeUnknown(CommunicationError):
+    """The exact START_SEQ was attempted, but its PLC-side outcome is unknown."""
+
+    def __init__(self, message: str, start_seq: int) -> None:
+        super().__init__(message)
+        self.start_seq = start_seq
+
+
 @dataclass(frozen=True)
 class StatusSnapshot:
     run_state: RunState | int
@@ -272,14 +288,23 @@ class TurntableModbusClient:
             if type(speed_index) is not int or not 1 <= speed_index <= 5:
                 raise ValueError("speed_index must be an integer in 1..5")
             self._require_verified()
-            if self.read_status().run_status is RunStatus.RUNNING:
-                raise CommunicationError("cannot write start parameters while run status is running")
-            for register, value in _PARAMETER_DEFAULTS:
-                self._write_registers(register, list(encode_i32(value)), "start parameter")
-            self._write_register(Register.MODE, int(mode), "mode")
-            self._write_register(Register.DIRECTION, int(direction) & 0xFFFF, "direction")
-            self._write_register(Register.SPEED_INDEX, speed_index, "speed index")
-            return self._increment_sequence(Register.START_SEQ, "start sequence")
+            start_seq = (self._sequences[Register.START_SEQ] + 1) & 0xFFFF
+            try:
+                if self.read_status().run_status is RunStatus.RUNNING:
+                    raise CommunicationError("cannot write start parameters while run status is running")
+                for register, value in _PARAMETER_DEFAULTS:
+                    self._write_registers(register, list(encode_i32(value)), "start parameter")
+                self._write_register(Register.MODE, int(mode), "mode")
+                self._write_register(Register.DIRECTION, int(direction) & 0xFFFF, "direction")
+                self._write_register(Register.SPEED_INDEX, speed_index, "speed index")
+            except CommunicationError as error:
+                raise StartNotIssued(str(error), start_seq) from error
+            try:
+                self._write_register(Register.START_SEQ, start_seq, "start sequence")
+            except CommunicationError as error:
+                raise StartOutcomeUnknown(str(error), start_seq) from error
+            self._sequences[Register.START_SEQ] = start_seq
+            return start_seq
 
     def send_stop(self) -> int:
         """Issue one direct software-stop sequence write; this is not an emergency stop."""

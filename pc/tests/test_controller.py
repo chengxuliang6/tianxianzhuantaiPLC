@@ -6,9 +6,14 @@ from threading import Event, Thread, get_ident
 
 import pytest
 
-from turntable_control.controller import CommandRejected, ControllerSnapshot, TurntableController
+from turntable_control.controller import (
+    CommandRejected,
+    ControllerSnapshot,
+    ControllerStopped,
+    TurntableController,
+)
 from turntable_control.domain import Direction, Mode, RunState, RunStatus
-from turntable_control.modbus_client import EventRecord, StatusSnapshot
+from turntable_control.modbus_client import EventRecord, StartNotIssued, StartOutcomeUnknown, StatusSnapshot
 from turntable_control.time_sync import ClockSynchronizer
 
 
@@ -227,6 +232,64 @@ def test_stop_has_priority_and_cancels_a_pending_start() -> None:
     assert client.calls == [("send_stop",)]
 
 
+def test_only_one_start_can_be_queued_or_in_flight_before_plc_confirmation() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    with pytest.raises(CommandRejected, match="启动命令正在等待PLC确认"):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+    with pytest.raises(CommandRejected, match="启动命令正在等待PLC确认"):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+
+    assert [call[0] for call in client.calls].count("send_start") == 1
+    assert ("send_start", Mode.MANUAL, Direction.CCW, 4) not in client.calls
+
+
+def test_exact_plc_start_confirmation_releases_pending_guard() -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        run_status=RunStatus.RUNNING,
+        start_ack_seq=1,
+        run_start_plc_ms=123,
+    )
+    clock.advance(100)
+    controller.process_once()
+    client.status = ready_status()
+    clock.advance(100)
+    controller.process_once()
+
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    assert ("send_start", Mode.MANUAL, Direction.CCW, 4) in client.calls
+
+
+def test_stop_clears_an_in_flight_start_guard_without_replaying_it() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+
+    controller.stop()
+    controller.process_once()
+    client.status = ready_status()
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("send_start") == 2
+    assert [call[0] for call in client.calls].count("send_stop") == 1
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
@@ -278,8 +341,33 @@ def test_fresh_worker_recheck_rejects_stale_start_without_killing_pump() -> None
     controller.process_once()
 
     assert [call[0] for call in client.calls] == ["read_status"]
+    assert controller.snapshot.status == client.status
     assert controller.snapshot.last_error == "未设零"
     assert errors == ["未设零"]
+
+
+def test_fresh_start_recheck_retains_a_new_terminal_buffer_without_sending_start() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=42,
+        event_count=1,
+        event_generation=7,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+    client.calls.clear()
+
+    controller.process_once()
+
+    assert [call[0] for call in client.calls] == ["read_status"]
+    assert controller.snapshot.status == client.status
+    assert controller.snapshot.download_pending
+    assert "send_start" not in [call[0] for call in client.calls]
+    assert "acknowledge_buffer" not in [call[0] for call in client.calls]
 
 
 def test_disconnect_clears_pending_commands_and_reconnect_never_replays_start() -> None:
@@ -299,6 +387,9 @@ def test_disconnect_clears_pending_commands_and_reconnect_never_replays_start() 
     assert names[:4] == ["close", "connect", "read_status", "request_time_sync"]
     assert "send_start" not in names
     assert "toggle_power" not in names
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+    assert ("send_start", Mode.MANUAL, Direction.CCW, 4) in client.calls
 
 
 def test_disconnect_request_rejects_commands_queued_before_worker_closes() -> None:
@@ -346,6 +437,170 @@ def test_communication_failure_disconnects_immediately_and_clears_pending_start(
     controller.connect()
     controller.process_once()
     assert [call[0] for call in client.calls].count("send_start") == 0
+
+
+def test_definite_pre_start_write_failure_clears_pending_guard() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartNotIssued("parameter write failed", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+
+    controller.process_once()
+    assert not controller.snapshot.connected
+
+    controller.connect()
+    controller.process_once()
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+    assert [call[0] for call in client.calls].count("send_start") == 2
+
+
+def test_unknown_start_outcome_never_claims_saves_or_acks_a_terminal_buffer(tmp_path: Path) -> None:
+    from turntable_control.modbus_client import CommunicationError
+
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    client.fail_next["send_start"] = CommunicationError("start outcome has no sequence")
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    assert not controller.snapshot.connected
+
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=33,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+    controller.connect()
+    controller.process_once()
+
+    names = [call[0] for call in client.calls]
+    assert "read_events" not in names
+    assert "save_run" not in names
+    assert "acknowledge_buffer" not in names
+    assert controller.snapshot.download_pending
+    assert "\u4eba\u5de5\u5bf9\u8d26" in (controller.snapshot.last_error or "")
+    assert "启动写入结果未知" in (controller.snapshot.last_error or "")
+
+
+def test_exact_unknown_start_reconciles_terminal_buffer_without_replaying_motion(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=34,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+
+    controller.connect()
+    controller.process_once()
+
+    names = [call[0] for call in client.calls]
+    assert names.count("send_start") == 1
+    assert names.count("save_run") == 1
+    assert names.count("acknowledge_buffer") == 1
+    assert not controller.snapshot.download_pending
+
+
+@pytest.mark.parametrize("observed_ack", [0, 1])
+def test_exact_unknown_start_clears_when_plc_is_ready_idle_without_buffer(
+    observed_ack: int,
+) -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(start_ack_seq=observed_ack, run_status=RunStatus.IDLE)
+
+    controller.connect()
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("send_start") == 1
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+    assert [call[0] for call in client.calls].count("send_start") == 2
+
+
+def test_exact_unknown_start_conflict_remains_blocked_for_manual_reconciliation() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=2,
+        event_count=1,
+        event_generation=35,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+
+    controller.connect()
+    controller.process_once()
+
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    assert controller.snapshot.download_pending
+    assert [call[0] for call in client.calls].count("send_start") == 1
+    assert "\u4eba\u5de5\u5bf9\u8d26" in (controller.snapshot.last_error or "")
+
+
+def test_exact_unknown_start_rejects_torn_terminal_and_running_state(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=36,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+
+    controller.connect()
+    controller.process_once()
+
+    names = [call[0] for call in client.calls]
+    assert names.count("send_start") == 1
+    assert "save_run" not in names
+    assert "acknowledge_buffer" not in names
+    assert controller.snapshot.download_pending
+    assert "\u4eba\u5de5\u5bf9\u8d26" in (controller.snapshot.last_error or "")
 
 
 def test_scheduler_polls_every_100_ms_and_heartbeats_every_250_ms() -> None:
@@ -410,6 +665,100 @@ def test_time_sync_only_accepts_a_matching_response_sequence() -> None:
     assert sync.best_sample.plc_ms == 600
 
 
+def test_invalid_time_sync_sample_is_consumed_reported_and_does_not_stop_heartbeat() -> None:
+    client = FakeClient()
+    clock = FakeClock(epoch_ms=1_000)
+    sync = ClockSynchronizer()
+    controller = make_controller(client, clock=clock, sync=sync)
+    errors: list[str] = []
+    controller.on_error(errors.append)
+    connect_controller(controller)
+    client.calls.clear()
+    client.status = ready_status(time_sync_response_seq=1, plc_tick_ms=500)
+    clock.epoch = 999
+    clock.monotonic = 100
+
+    controller.process_once()
+
+    assert sync.sample_count == 0
+    assert controller.snapshot.connected
+    assert errors and "clock synchronization" in errors[0]
+    client.calls.clear()
+    clock.monotonic = 250
+    controller.process_once()
+    assert ("write_heartbeat", 1) in client.calls
+    assert len(errors) == 1
+
+
+def test_run_start_tick_change_is_a_session_fingerprint_conflict(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        run_status=RunStatus.RUNNING,
+        start_ack_seq=1,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=37,
+        run_start_plc_ms=999,
+    )
+    clock.advance(100)
+
+    controller.process_once()
+
+    names = [call[0] for call in client.calls]
+    assert "save_run" not in names
+    assert "acknowledge_buffer" not in names
+    assert controller.snapshot.download_pending
+    assert "run-start tick" in (controller.snapshot.last_error or "")
+
+
+def test_known_session_rejects_terminal_buffer_with_running_state(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        status_flags=0x000B,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=38,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+
+    controller.process_once()
+
+    names = [call[0] for call in client.calls]
+    assert "save_run" not in names
+    assert "acknowledge_buffer" not in names
+    assert controller.snapshot.download_pending
+    assert "state" in (controller.snapshot.last_error or "")
+
+
 @pytest.mark.parametrize("terminal_status", [RunStatus.COMPLETED, RunStatus.AUTOMATIC_ABORTED])
 def test_terminal_pipeline_uses_exact_run_start_and_orders_read_save_ack(
     tmp_path: Path, terminal_status: RunStatus
@@ -425,14 +774,12 @@ def test_terminal_pipeline_uses_exact_run_start_and_orders_read_save_ack(
     connect_controller(controller)
     controller.start(Mode.AUTO, Direction.CW, 1.0)
     controller.process_once()
-    client.events = [
-        EventRecord(1, 1, 1.0, 2),
-        EventRecord(2, 2, 2.0, 3),
-    ]
+    event_count = 360 if terminal_status is RunStatus.COMPLETED else 2
+    client.events = [EventRecord(index, index, float(index), index + 1) for index in range(1, event_count + 1)]
     client.status = ready_status(
         status_flags=0x000B,
         start_ack_seq=1,
-        event_count=2,
+        event_count=event_count,
         event_generation=7,
         run_status=terminal_status,
         run_start_plc_ms=0xFFFF_FFFE,
@@ -450,6 +797,64 @@ def test_terminal_pipeline_uses_exact_run_start_and_orders_read_save_ack(
     assert export.metadata.test_id.endswith("_g7")
     assert controller.snapshot.saved_csv == saved[0]
     assert not controller.snapshot.download_pending
+
+
+def test_terminal_pipeline_rejects_a_travel_angle_gap_without_ack(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.MANUAL, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10), EventRecord(2, 3, 3.0, 20)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=2,
+        event_generation=40,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+
+    clock.advance(100)
+    controller.process_once()
+
+    assert not store.exports
+    assert "acknowledge_buffer" not in [call[0] for call in client.calls]
+    assert controller.snapshot.download_pending
+    assert "行程角度" in (controller.snapshot.last_error or "")
+
+
+def test_auto_completed_requires_exactly_360_events_before_save_or_ack(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(index, index, float(index), index) for index in range(1, 360)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=359,
+        event_generation=41,
+        run_status=RunStatus.COMPLETED,
+        run_start_plc_ms=100,
+    )
+
+    clock.advance(100)
+    controller.process_once()
+
+    assert not store.exports
+    assert "acknowledge_buffer" not in [call[0] for call in client.calls]
+    assert controller.snapshot.download_pending
+    assert "360" in (controller.snapshot.last_error or "")
 
 
 def test_save_failure_retains_buffer_and_only_explicit_retry_retries(tmp_path: Path) -> None:
@@ -511,7 +916,7 @@ def test_ack_uncertainty_reconnects_and_reuses_durable_file_without_resave(tmp_p
         start_ack_seq=1,
         event_count=1,
         event_generation=9,
-        run_status=RunStatus.COMPLETED,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
         run_start_plc_ms=100,
     )
     client.fail_next["acknowledge_buffer"] = CommunicationError("ack response lost")
@@ -533,6 +938,98 @@ def test_ack_uncertainty_reconnects_and_reuses_durable_file_without_resave(tmp_p
     assert not controller.snapshot.download_pending
 
 
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        {"start_ack_seq": 77},
+        {"event_generation": 10},
+        {"event_count": 2},
+        {"run_status": RunStatus.COMMUNICATION_ABORTED},
+        {"run_start_plc_ms": 101},
+    ],
+    ids=("start-ack", "generation", "event-count", "terminal-status", "run-start-tick"),
+)
+def test_ack_recovery_refuses_any_buffer_fingerprint_mismatch(
+    tmp_path: Path, mismatch: dict[str, object]
+) -> None:
+    from turntable_control.modbus_client import CommunicationError
+
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    saved_status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=9,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+    client.status = saved_status
+    client.fail_next["acknowledge_buffer"] = CommunicationError("ack response lost")
+    clock.advance(100)
+    controller.process_once()
+    assert controller.snapshot.download_pending
+    assert [call[0] for call in client.calls].count("save_run") == 1
+    assert [call[0] for call in client.calls].count("acknowledge_buffer") == 1
+
+    client.status = replace(saved_status, **mismatch)
+    controller.connect()
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("save_run") == 1
+    assert [call[0] for call in client.calls].count("acknowledge_buffer") == 1
+    assert controller.snapshot.download_pending
+    assert "指纹不一致" in (controller.snapshot.last_error or "")
+
+
+@pytest.mark.parametrize("evidence_field", ["active_test_id", "saved_csv"])
+def test_ack_recovery_refuses_published_evidence_mismatch(
+    tmp_path: Path, evidence_field: str
+) -> None:
+    from turntable_control.modbus_client import CommunicationError
+
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=9,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
+        run_start_plc_ms=100,
+    )
+    client.fail_next["acknowledge_buffer"] = CommunicationError("ack response lost")
+    clock.advance(100)
+    controller.process_once()
+    if evidence_field == "active_test_id":
+        controller._snapshot = replace(controller.snapshot, active_test_id="different-test")
+    else:
+        controller._snapshot = replace(controller.snapshot, saved_csv=tmp_path / "different.csv")
+
+    controller.connect()
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("acknowledge_buffer") == 1
+    assert controller.snapshot.download_pending
+    assert controller.snapshot.last_error is not None
+
+
 def test_duplicate_generation_is_saved_and_acknowledged_at_most_once(tmp_path: Path) -> None:
     client = FakeClient()
     clock = FakeClock()
@@ -549,7 +1046,7 @@ def test_duplicate_generation_is_saved_and_acknowledged_at_most_once(tmp_path: P
         start_ack_seq=1,
         event_count=1,
         event_generation=10,
-        run_status=RunStatus.COMPLETED,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
         run_start_plc_ms=100,
     )
     client.calls.clear()
@@ -580,7 +1077,7 @@ def test_event_read_failure_requires_reconnect_and_explicit_retry(tmp_path: Path
         start_ack_seq=1,
         event_count=1,
         event_generation=11,
-        run_status=RunStatus.COMPLETED,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
         run_start_plc_ms=100,
     )
     client.fail_next["read_events"] = CommunicationError("event read lost")
@@ -618,7 +1115,7 @@ def test_reconnect_marks_saved_ack_complete_when_plc_already_cleared_buffer(tmp_
         start_ack_seq=1,
         event_count=1,
         event_generation=12,
-        run_status=RunStatus.COMPLETED,
+        run_status=RunStatus.AUTOMATIC_ABORTED,
         run_start_plc_ms=100,
     )
     client.fail_next["acknowledge_buffer"] = CommunicationError("ack response lost")
@@ -626,7 +1123,7 @@ def test_reconnect_marks_saved_ack_complete_when_plc_already_cleared_buffer(tmp_
     controller.process_once()
     assert controller.snapshot.download_pending
 
-    client.status = ready_status(event_generation=12, run_status=RunStatus.COMPLETED)
+    client.status = ready_status(event_generation=12, run_status=RunStatus.AUTOMATIC_ABORTED)
     controller.connect()
     controller.process_once()
 
@@ -670,11 +1167,13 @@ def test_background_is_idempotent_shutdown_closes_on_the_single_worker_thread() 
     controller.start_background()
     controller.start_background()
     assert connected.wait(1.0)
+    client.call_event.clear()
     controller.toggle_power()
     assert client.call_event.wait(1.0)
     controller.shutdown(timeout=1.0)
 
     assert [call[0] for call in client.calls].count("connect") == 1
+    assert [call[0] for call in client.calls].count("toggle_power") == 1
     assert [call[0] for call in client.calls].count("close") == 1
     assert len(set(client.io_threads)) == 1
     assert client.io_threads[0] != caller_thread
@@ -696,6 +1195,18 @@ def test_process_once_rejects_a_second_io_thread() -> None:
     assert "同一控制线程" in str(errors[0])
 
 
+def test_background_mode_is_rejected_after_deterministic_pump_claims_io_thread() -> None:
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+
+    with pytest.raises(ControllerStopped):
+        controller.start_background()
+
+    controller.shutdown(timeout=1.0)
+    assert len(set(client.io_threads)) == 1
+
+
 def test_shutdown_in_deterministic_pump_mode_closes_through_the_pump() -> None:
     client = FakeClient()
     controller = make_controller(client)
@@ -706,6 +1217,40 @@ def test_shutdown_in_deterministic_pump_mode_closes_through_the_pump() -> None:
 
     assert client.calls == [("close",)]
     assert not controller.snapshot.connected
+
+
+def test_deterministic_shutdown_reports_close_failure_and_publishes_disconnected() -> None:
+    from turntable_control.modbus_client import CommunicationError
+
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["close"] = CommunicationError("close failed")
+
+    with pytest.raises(ControllerStopped, match="close failed"):
+        controller.shutdown(timeout=1.0)
+
+    assert not controller.snapshot.connected
+    assert "close failed" in (controller.snapshot.last_error or "")
+
+
+def test_background_shutdown_reports_close_failure_and_publishes_disconnected() -> None:
+    from turntable_control.modbus_client import CommunicationError
+
+    client = FakeClient()
+    controller = make_controller(client)
+    connected = Event()
+    controller.on_snapshot(lambda snapshot: connected.set() if snapshot.connected else None)
+    controller.connect()
+    controller.start_background()
+    assert connected.wait(1.0)
+    client.fail_next["close"] = CommunicationError("close failed")
+
+    with pytest.raises(ControllerStopped, match="close failed"):
+        controller.shutdown(timeout=1.0)
+
+    assert not controller.snapshot.connected
+    assert "close failed" in (controller.snapshot.last_error or "")
 
 
 def test_disconnect_discards_an_unanswered_time_sync_request() -> None:
@@ -746,7 +1291,7 @@ def test_a_new_run_can_reuse_a_wrapped_generation_without_reusing_old_evidence(t
             start_ack_seq=run_number + 1,
             event_count=1,
             event_generation=0,
-            run_status=RunStatus.COMPLETED,
+            run_status=RunStatus.AUTOMATIC_ABORTED,
             run_start_plc_ms=100 + run_number,
         )
         clock.advance(100)

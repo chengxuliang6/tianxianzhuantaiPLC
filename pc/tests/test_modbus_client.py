@@ -338,20 +338,41 @@ def test_parameter_write_failure_never_reaches_start_sequence(fake_transport: Fa
 
 
 def test_start_response_error_is_ambiguous_and_disables_following_commands(fake_transport: FakeTransport) -> None:
-    from turntable_control.modbus_client import CommunicationError, ProtocolMismatch
+    from turntable_control.modbus_client import ProtocolMismatch, StartOutcomeUnknown
 
     client = make_client(fake_transport)
     connect(client)
     fake_transport.single_write_error_on_address = Register.START_SEQ
 
-    with pytest.raises(CommunicationError, match="start sequence"):
+    with pytest.raises(StartOutcomeUnknown, match="start sequence") as raised:
         client.send_start(Mode.AUTO, Direction.CW, 1)
+    assert raised.value.start_seq == 1
     assert fake_transport.memory[Register.START_SEQ] == 1
     with pytest.raises(ProtocolMismatch):
         client.send_stop()
     writes_before_reconnect = list(fake_transport.write_calls)
     client.reconnect()
     assert fake_transport.write_calls == writes_before_reconnect
+
+
+@pytest.mark.parametrize("failure", ["response_error", "exception"])
+def test_start_parameter_failure_is_definitely_not_issued_and_exposes_intended_sequence(
+    fake_transport: FakeTransport, failure: str
+) -> None:
+    from turntable_control.modbus_client import StartNotIssued
+
+    client = make_client(fake_transport)
+    connect(client)
+    if failure == "response_error":
+        fake_transport.multiple_write_error_on_call = 1
+    else:
+        fake_transport.multiple_write_exception_on_call = 1
+
+    with pytest.raises(StartNotIssued, match="start parameter") as raised:
+        client.send_start(Mode.AUTO, Direction.CW, 1)
+
+    assert raised.value.start_seq == 1
+    assert all(call["address"] != Register.START_SEQ for call in fake_transport.write_calls)
 
 
 @pytest.mark.parametrize("failure", ["response_error", "exception", "short_read", "malformed"])

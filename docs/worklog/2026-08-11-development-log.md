@@ -207,3 +207,22 @@
 - Controller tests first failed at collection with `ModuleNotFoundError: turntable_control.controller`. Subsequent RED groups demonstrated missing worker-side interlock/error handling, scheduling/sync, terminal download/ACK recovery, callback reporting, pump shutdown, stale sync invalidation, and generation-wrap handling before each minimal implementation.
 - All controller tests use injected fake clients/stores and temporary paths. No real network, PLC, AutoShop, servo, or hardware operation was accessed or performed.
 - AutoShop compilation and actual PLC timing/word order remain controlled on-site verification work; the software stop and communication heartbeat are not a physical emergency stop.
+
+## Task 7 review remediation: session reconciliation and failure containment
+
+### Completed work
+
+- Added a single queued/in-flight START guard and explicit `StartNotIssued` versus `StartOutcomeUnknown` client outcomes. STOP, disconnect, and definite pre-START rejection release the normal guard; an uncertain START never creates a wildcard run session. On reconnect an exact sequence plus consistent running/terminal PLC evidence rebuilds only the local session without replaying motion, a definite READY/IDLE rejection clears the uncertainty, and unknown/conflicting evidence remains blocked for manual reconciliation.
+- Reconciliation also validates the PLC state/buffer pair: running evidence must match the requested mode with no retained buffer, non-fault terminal evidence must be READY with a buffer, and fault terminal evidence must be FAULT with a buffer. Because the PLC echoes rejected START sequences too, READY/IDLE/no-buffer clears uncertainty regardless of whether the acknowledgement equals the attempted sequence.
+- Once a matching running/terminal status captures the PLC-published run-start tick, later status reads must retain that exact tick. A changed tick or a terminal buffer paired with a contradictory run state is treated as a session-fingerprint conflict and is never saved or ACKed.
+- Replaced generation-only ACK recovery with a complete durable evidence record covering the exact session token, START acknowledgement, generation, event count, terminal status, run-start tick, test ID, and published CSV path. Reconnect refuses ACK when PLC or published evidence differs and reports a manual reconciliation error.
+- Required every event travel angle to equal its sequence and required AUTO/COMPLETED runs to contain all 360 events before CSV publication or buffer ACK.
+- Made shutdown always publish disconnected, surface worker/close failures as `ControllerStopped`, consume invalid matching time-sync responses without killing polling/heartbeat, and publish/process the fresh status used for the final START interlock.
+- Fixed the background single-thread test so its event wait cannot pass from earlier connect I/O and it proves the queued command actually ran.
+- Rejected switching from an already claimed deterministic pump to a new background worker, preventing the background finalizer from closing the client on a second I/O thread.
+
+### Test-first evidence and constraints
+
+- Review regressions reproduced unsafe ACK of mismatched evidence, ambiguous START ownership, incomplete completed runs, stale fresh-status publication, an escaping backward-clock sample, and both deterministic/background close failures before their corresponding fixes. The lifecycle group initially reported five failures plus one passing non-vacuous worker test; the added published-evidence pair also failed by attempting a second ACK before the full local fingerprint check.
+- Fresh final verification passed 196 focused controller/protocol/storage/time tests and all 251 PC tests; source compilation and Git whitespace checks also passed. An independent read-only code review reported no remaining Critical, Important, or Minor findings.
+- All regression and verification runs used only fake transports, fake clients/stores, injected clocks, and temporary local files. No PLC, network endpoint, AutoShop session, servo, or hardware was accessed or written.

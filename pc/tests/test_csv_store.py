@@ -15,7 +15,12 @@ from turntable_control.modbus_client import EventRecord
 from turntable_control.time_sync import ClockSynchronizer
 
 
-def sample_run(*, test_id: str = "test-001", count: int = 2) -> RunExport:
+def sample_run(
+    *,
+    test_id: str = "test-001",
+    count: int = 2,
+    run_status: RunStatus = RunStatus.AUTOMATIC_ABORTED,
+) -> RunExport:
     events = tuple(
         EventRecord(index, index, index + 0.25, index * 100)
         for index in range(1, count + 1)
@@ -30,7 +35,7 @@ def sample_run(*, test_id: str = "test-001", count: int = 2) -> RunExport:
             acceleration_deg_s2=5.0,
             deceleration_deg_s2=5.0,
             stop_deceleration_deg_s2=10.0,
-            run_status=RunStatus.COMPLETED,
+            run_status=run_status,
             run_start_plc_ms=0xFFFF_FF00,
             saved_at_epoch_ms=1_700_000_000_123,
         ),
@@ -45,7 +50,9 @@ def synced_clock() -> ClockSynchronizer:
 
 
 def test_save_run_writes_bom_header_360_rows_and_time_fields(tmp_path: Path) -> None:
-    output = CsvStore(tmp_path).save_run(sample_run(count=360), synced_clock())
+    output = CsvStore(tmp_path).save_run(
+        sample_run(count=360, run_status=RunStatus.COMPLETED), synced_clock()
+    )
 
     assert output == tmp_path / "test-001.csv"
     assert output.read_bytes().startswith(b"\xef\xbb\xbf")
@@ -75,6 +82,23 @@ def test_save_run_rejects_malformed_records_before_opening_file(tmp_path: Path) 
 
     with pytest.raises(CsvSaveError):
         CsvStore(tmp_path).save_run(malformed, synced_clock())
+    assert not list(tmp_path.iterdir())
+
+
+def test_save_run_requires_each_travel_angle_to_equal_its_sequence(tmp_path: Path) -> None:
+    run = sample_run()
+    gap = RunExport(run.metadata, (EventRecord(1, 1, 1.0, 0), EventRecord(2, 3, 3.0, 1)))
+
+    with pytest.raises(CsvSaveError, match="travel angles must equal sequences"):
+        CsvStore(tmp_path).save_run(gap, synced_clock())
+    assert not list(tmp_path.iterdir())
+
+
+def test_save_run_requires_auto_completed_to_have_all_360_events(tmp_path: Path) -> None:
+    incomplete = sample_run(count=359, run_status=RunStatus.COMPLETED)
+
+    with pytest.raises(CsvSaveError, match="AUTO COMPLETED.*360"):
+        CsvStore(tmp_path).save_run(incomplete, synced_clock())
     assert not list(tmp_path.iterdir())
 
 

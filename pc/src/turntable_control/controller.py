@@ -19,7 +19,13 @@ from .domain import (
     manual_target,
 )
 from .csv_store import RunExport, RunMetadata
-from .modbus_client import CommunicationError, ProtocolMismatch, StatusSnapshot
+from .modbus_client import (
+    CommunicationError,
+    ProtocolMismatch,
+    StartNotIssued,
+    StartOutcomeUnknown,
+    StatusSnapshot,
+)
 
 
 STATUS_ZERO_VALID = 0x0001
@@ -60,8 +66,46 @@ class _RunSession:
     direction: Direction
     speed_deg_s: float
     requested_epoch_ms: int
-    start_seq: int | None = None
+    session_token: int
+    start_seq: int
     run_start_plc_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class _UncertainStart:
+    command: _StartCommand
+    start_seq: int | None
+    requested_epoch_ms: int
+
+
+@dataclass(frozen=True)
+class _DurableRecovery:
+    session_token: int
+    start_ack_seq: int
+    generation: int
+    event_count: int
+    run_status: RunStatus
+    run_start_plc_ms: int
+    test_id: str
+    path: Path
+
+    def matches(
+        self,
+        status: StatusSnapshot,
+        session: _RunSession | None,
+        snapshot: ControllerSnapshot,
+    ) -> bool:
+        return (
+            session is not None
+            and session.session_token == self.session_token
+            and snapshot.active_test_id == self.test_id
+            and snapshot.saved_csv == self.path
+            and status.start_ack_seq == self.start_ack_seq
+            and status.event_generation == self.generation
+            and status.event_count == self.event_count
+            and status.run_status is self.run_status
+            and status.run_start_plc_ms == self.run_start_plc_ms
+        )
 
 
 _TERMINAL_RUN_STATUSES = frozenset(
@@ -111,18 +155,22 @@ class TurntableController:
         self._wake = Event()
         self._shutdown_requested = Event()
         self._worker: Thread | None = None
+        self._terminal_failure: Exception | None = None
         self._io_thread_id: int | None = None
         self._next_poll_ms: int | None = None
         self._next_heartbeat_ms: int | None = None
         self._heartbeat = 0
         self._pending_sync: tuple[int, int] | None = None
         self._run_session: _RunSession | None = None
+        self._pending_start: _StartCommand | None = None
+        self._uncertain_start: _UncertainStart | None = None
         self._attempted_generations: set[int] = set()
-        self._saved_generations: dict[int, Path] = {}
         self._handled_generations: set[int] = set()
         self._generation_test_ids: dict[int, str] = {}
         self._verified_session = 0
         self._ack_attempts: set[tuple[int, int]] = set()
+        self._durable_recovery: _DurableRecovery | None = None
+        self._next_session_token = 0
 
     @property
     def snapshot(self) -> ControllerSnapshot:
@@ -158,8 +206,17 @@ class TurntableController:
             self._ensure_running()
             if self._disconnect_requested:
                 raise CommandRejected("PLC未连接")
+            if self._uncertain_start is not None:
+                raise CommandRejected("上次启动写入结果未知，禁止自动重试运动")
+            if self._pending_start is not None:
+                raise CommandRejected("启动命令正在等待PLC确认")
             command = self._validated_start(mode, direction, speed_deg_s, self._snapshot)
-            self._enqueue_locked("start", command)
+            self._pending_start = command
+            try:
+                self._enqueue_locked("start", command)
+            except Exception:
+                self._pending_start = None
+                raise
 
     def stop(self) -> None:
         with self._lock:
@@ -167,6 +224,7 @@ class TurntableController:
             if not self._snapshot.connected or self._disconnect_requested:
                 raise CommandRejected("PLC未连接")
             self._commands = deque((name, value) for name, value in self._commands if name != "start")
+            self._pending_start = None
             self._stop_requested = True
             self._wake.set()
 
@@ -195,14 +253,7 @@ class TurntableController:
 
     def _process_once_impl(self) -> None:
         if self._shutdown_requested.is_set():
-            with self._lock:
-                self._commands.clear()
-                self._stop_requested = False
-                self._disconnect_requested = False
-            if self.snapshot.connected:
-                self._client.close()
-            self._pending_sync = None
-            self._publish(replace(self.snapshot, connected=False))
+            self._finalize_shutdown()
             return
         if self._disconnect_requested:
             self._process_disconnect()
@@ -226,17 +277,43 @@ class TurntableController:
         elif name == "start":
             assert isinstance(value, _StartCommand)
             fresh = self._client.read_status()
-            self._validated_start(value.mode, value.direction, value.speed_deg_s, replace(self.snapshot, status=fresh))
+            self._accept_status(fresh)
+            try:
+                self._validated_start(value.mode, value.direction, value.speed_deg_s, self.snapshot)
+            except CommandRejected:
+                self._pending_start = None
+                raise
             self._attempted_generations.clear()
-            self._saved_generations.clear()
             self._handled_generations.clear()
             self._generation_test_ids.clear()
             self._ack_attempts.clear()
             requested_epoch = self._epoch_ms()
-            self._run_session = _RunSession(value.mode, value.direction, value.speed_deg_s, requested_epoch)
+            try:
+                start_seq = self._client.send_start(value.mode, value.direction, value.speed_index)
+            except StartNotIssued:
+                self._pending_start = None
+                self._run_session = None
+                raise
+            except StartOutcomeUnknown as error:
+                self._pending_start = None
+                self._run_session = None
+                self._uncertain_start = _UncertainStart(value, error.start_seq, requested_epoch)
+                raise
+            except CommunicationError:
+                self._pending_start = None
+                self._run_session = None
+                self._uncertain_start = _UncertainStart(value, None, requested_epoch)
+                raise
+            self._next_session_token += 1
+            self._run_session = _RunSession(
+                value.mode,
+                value.direction,
+                value.speed_deg_s,
+                requested_epoch,
+                self._next_session_token,
+                start_seq=start_seq,
+            )
             self._publish(replace(self.snapshot, status=fresh, active_test_id=f"run_{requested_epoch}", last_error=None))
-            start_seq = self._client.send_start(value.mode, value.direction, value.speed_index)
-            self._run_session = replace(self._run_session, start_seq=start_seq)
             self._request_time_sync()
         elif name == "set_zero":
             self._client.set_zero()
@@ -256,6 +333,10 @@ class TurntableController:
             self._ensure_running()
             if self._worker is not None and self._worker.is_alive():
                 return
+            if self._io_thread_id is not None:
+                raise ControllerStopped(
+                    "确定性process_once模式已占用I/O线程，禁止切换到后台线程"
+                )
             self._worker = Thread(target=self._worker_loop, name="turntable-controller", daemon=True)
             self._worker.start()
 
@@ -269,6 +350,9 @@ class TurntableController:
                 raise ControllerStopped("控制器线程未能在超时内停止")
         else:
             self.process_once()
+        failure = self._terminal_failure
+        if failure is not None:
+            raise ControllerStopped(str(failure)) from failure
 
     def _process_connect(self) -> None:
         self._client.connect()
@@ -287,6 +371,7 @@ class TurntableController:
             self._disconnect_requested = False
             self._commands.clear()
             self._stop_requested = False
+            self._pending_start = None
         if self.snapshot.connected:
             self._client.close()
         self._pending_sync = None
@@ -313,40 +398,139 @@ class TurntableController:
                 self._next_heartbeat_ms += self._heartbeat_interval_ms
 
     def _accept_status(self, status: StatusSnapshot, *, reconnect: bool = False) -> None:
+        sync_error: str | None = None
+        session_error: str | None = None
+        reconciliation_error, reconciled_test_id = self._reconcile_uncertain_start(status)
         pending = self._pending_sync
         if pending is not None and status.time_sync_response_seq == pending[0]:
-            self._clock_sync.add_sample(pending[1], status.plc_tick_ms, self._epoch_ms())
             self._pending_sync = None
+            try:
+                self._clock_sync.add_sample(pending[1], status.plc_tick_ms, self._epoch_ms())
+            except Exception as error:
+                sync_error = f"clock synchronization sample rejected: {error}"
         session = self._run_session
         terminal = status.run_status in _TERMINAL_RUN_STATUSES
         if session is not None and (status.run_status is RunStatus.RUNNING or terminal):
-            if session.start_seq is None or status.start_ack_seq == session.start_seq:
-                self._run_session = replace(session, run_start_plc_ms=status.run_start_plc_ms)
-        self._publish(replace(self.snapshot, status=status, last_error=None))
+            if status.start_ack_seq == session.start_seq:
+                if session.run_start_plc_ms is None:
+                    self._run_session = replace(session, run_start_plc_ms=status.run_start_plc_ms)
+                elif session.run_start_plc_ms != status.run_start_plc_ms:
+                    session_error = (
+                        "PLC完整指纹不一致（run-start tick冲突）；禁止保存或确认缓冲区"
+                    )
+                self._pending_start = None
+        self._publish(
+            replace(
+                self.snapshot,
+                status=status,
+                active_test_id=reconciled_test_id or self.snapshot.active_test_id,
+                last_error=session_error or sync_error or reconciliation_error,
+            )
+        )
+        if session_error is not None:
+            if status.status_flags & STATUS_BUFFER_READY:
+                self._publish(
+                    replace(self.snapshot, download_pending=True, last_error=session_error)
+                )
+            self._notify_error(session_error)
+            return
+        if sync_error is not None:
+            self._notify_error(sync_error)
+        elif reconciliation_error is not None:
+            self._notify_error(reconciliation_error)
         self._attempt_download(status, reconnect=reconnect)
+
+    def _reconcile_uncertain_start(self, status: StatusSnapshot) -> tuple[str | None, str | None]:
+        uncertain = self._uncertain_start
+        if uncertain is None:
+            return None, None
+        if uncertain.start_seq is None:
+            return "启动序号不可知，禁止自动归属；需要人工对账", None
+        buffer_ready = bool(status.status_flags & STATUS_BUFFER_READY)
+        expected_running_state = (
+            RunState.AUTO_RUNNING if uncertain.command.mode is Mode.AUTO else RunState.MANUAL_RUNNING
+        )
+        exact_ack = status.start_ack_seq == uncertain.start_seq
+        consistent_running = (
+            exact_ack
+            and status.run_status is RunStatus.RUNNING
+            and status.run_state is expected_running_state
+            and not buffer_ready
+        )
+        expected_terminal_state = (
+            RunState.FAULT if status.run_status is RunStatus.FAULTED else RunState.READY
+        )
+        consistent_terminal = (
+            exact_ack
+            and status.run_status in _TERMINAL_RUN_STATUSES
+            and status.run_state is expected_terminal_state
+            and buffer_ready
+        )
+        if consistent_running or consistent_terminal:
+            self._next_session_token += 1
+            self._run_session = _RunSession(
+                mode=uncertain.command.mode,
+                direction=uncertain.command.direction,
+                speed_deg_s=uncertain.command.speed_deg_s,
+                requested_epoch_ms=uncertain.requested_epoch_ms,
+                session_token=self._next_session_token,
+                start_seq=uncertain.start_seq,
+                run_start_plc_ms=status.run_start_plc_ms,
+            )
+            self._uncertain_start = None
+            self._pending_start = None
+            return None, f"run_{uncertain.requested_epoch_ms}"
+        definitely_not_accepted = (
+            status.run_state is RunState.READY
+            and status.run_status is RunStatus.IDLE
+            and not buffer_ready
+        )
+        if definitely_not_accepted:
+            self._uncertain_start = None
+            self._run_session = None
+            self._pending_start = None
+            return None, None
+        return "启动确认序号或PLC状态/缓冲区与不确定START冲突；需要人工对账", None
 
     def _attempt_download(
         self, status: StatusSnapshot, *, explicit: bool = False, reconnect: bool = False
     ) -> None:
         generation = status.event_generation
         buffer_ready = bool(status.status_flags & STATUS_BUFFER_READY)
-        if generation in self._handled_generations:
-            return
-        saved = self._saved_generations.get(generation)
-        if saved is not None:
+        recovery = self._durable_recovery
+        if recovery is not None:
             if not buffer_ready:
-                self._handled_generations.add(generation)
+                self._handled_generations.add(recovery.generation)
+                self._durable_recovery = None
                 self._publish(replace(self.snapshot, download_pending=False, active_test_id=None))
             elif reconnect or explicit:
-                self._acknowledge_generation(generation)
+                if not recovery.matches(status, self._run_session, self.snapshot):
+                    self._download_failed("PLC缓冲区与已保存CSV的完整指纹不一致，禁止确认；需要人工对账")
+                    return
+                self._acknowledge_recovery(recovery)
+            return
+        if generation in self._handled_generations:
             return
         if not buffer_ready or status.run_status not in _TERMINAL_RUN_STATUSES:
             return
         if generation in self._attempted_generations and not explicit:
             return
         self._attempted_generations.add(generation)
+        expected_terminal_state = (
+            RunState.FAULT if status.run_status is RunStatus.FAULTED else RunState.READY
+        )
+        if status.run_state is not expected_terminal_state:
+            self._download_failed(
+                "PLC terminal state与终态缓冲区不一致；禁止保存或确认缓冲区；需要人工对账"
+            )
+            return
         session = self._run_session
-        if session is None or (session.start_seq is not None and status.start_ack_seq != session.start_seq):
+        if session is None and self._uncertain_start is not None:
+            self._download_failed(
+                "启动写入结果未知，禁止自动归属、保存或确认PLC缓冲区；需要人工对账"
+            )
+            return
+        if session is None or status.start_ack_seq != session.start_seq:
             self._download_failed("缺少本次运行会话信息")
             return
         if not 1 <= status.event_count <= 360:
@@ -371,13 +555,24 @@ class TurntableController:
         self._publish(replace(self.snapshot, download_pending=True, last_error=None))
         try:
             events = self._client.read_events(status.event_count)
+            self._validate_event_integrity(events, status, session)
             path = Path(self._csv_store.save_run(RunExport(metadata=metadata, events=events), self._clock_sync))
         except (CommunicationError, ProtocolMismatch):
             raise
         except Exception as error:
             self._download_failed(str(error))
             return
-        self._saved_generations[generation] = path
+        recovery = _DurableRecovery(
+            session_token=session.session_token,
+            start_ack_seq=status.start_ack_seq,
+            generation=generation,
+            event_count=status.event_count,
+            run_status=status.run_status,
+            run_start_plc_ms=status.run_start_plc_ms,
+            test_id=test_id,
+            path=path,
+        )
+        self._durable_recovery = recovery
         self._publish(
             replace(
                 self.snapshot,
@@ -388,15 +583,34 @@ class TurntableController:
             )
         )
         self._notify_run_saved(path)
-        self._acknowledge_generation(generation)
+        self._acknowledge_recovery(recovery)
 
-    def _acknowledge_generation(self, generation: int) -> None:
-        key = (self._verified_session, generation)
+    @staticmethod
+    def _validate_event_integrity(
+        events: object, status: StatusSnapshot, session: _RunSession
+    ) -> None:
+        try:
+            records = tuple(events)  # type: ignore[arg-type]
+        except TypeError as error:
+            raise ValueError("PLC事件列表无效") from error
+        if len(records) != status.event_count:
+            raise ValueError("PLC事件数量与读取结果不一致，禁止确认缓冲区")
+        for expected, event in enumerate(records, start=1):
+            if getattr(event, "sequence", None) != expected:
+                raise ValueError("PLC事件序号必须严格等于1..N，禁止确认缓冲区")
+            if getattr(event, "travel_angle_deg", None) != expected:
+                raise ValueError("PLC行程角度必须严格等于事件序号，禁止确认缓冲区")
+        if session.mode is Mode.AUTO and status.run_status is RunStatus.COMPLETED and len(records) != 360:
+            raise ValueError("AUTO COMPLETED必须包含完整360条1..360度事件，禁止确认缓冲区")
+
+    def _acknowledge_recovery(self, recovery: _DurableRecovery) -> None:
+        key = (self._verified_session, recovery.generation)
         if key in self._ack_attempts:
             return
         self._ack_attempts.add(key)
         self._client.acknowledge_buffer()
-        self._handled_generations.add(generation)
+        self._handled_generations.add(recovery.generation)
+        self._durable_recovery = None
         self._publish(replace(self.snapshot, download_pending=False, active_test_id=None, last_error=None))
 
     def _download_failed(self, message: str) -> None:
@@ -518,6 +732,7 @@ class TurntableController:
             self._commands.clear()
             self._stop_requested = False
             self._disconnect_requested = False
+            self._pending_start = None
         self._pending_sync = None
         self._next_poll_ms = None
         self._next_heartbeat_ms = None
@@ -531,12 +746,41 @@ class TurntableController:
                 pass
 
     def _worker_loop(self) -> None:
+        failure: Exception | None = None
         try:
             while not self._shutdown_requested.is_set():
                 self.process_once()
                 self._wake.wait(0.05)
                 self._wake.clear()
+        except Exception as error:
+            failure = error
         finally:
+            self._finalize_shutdown(failure)
+
+    def _finalize_shutdown(self, prior_failure: Exception | None = None) -> None:
+        with self._lock:
+            self._commands.clear()
+            self._stop_requested = False
+            self._disconnect_requested = False
+            self._pending_start = None
+        close_failure: Exception | None = None
+        try:
             if self.snapshot.connected:
                 self._client.close()
-                self._publish(replace(self.snapshot, connected=False))
+        except Exception as error:
+            close_failure = error
+        self._pending_sync = None
+        self._next_poll_ms = None
+        self._next_heartbeat_ms = None
+        failure = prior_failure or close_failure
+        if failure is not None:
+            self._terminal_failure = failure
+        self._publish(
+            replace(
+                self.snapshot,
+                connected=False,
+                last_error=str(failure) if failure is not None else self.snapshot.last_error,
+            )
+        )
+        if failure is not None:
+            self._notify_error(str(failure))
