@@ -256,3 +256,37 @@
 - RED regressions reproduced replacement START after confirmed RUNNING evidence disappeared, a permanent STOP barrier after normal save/ACK, the same lifecycle wedge after an uncertain ACK whose buffer was already cleared, and a barrier-controlled concurrent START being erased by uncertain reconciliation.
 - The independent latest-tree review reported SF1, SF2, and QF1 closed with no remaining Critical, Important, or Minor findings; its fresh runs passed 172 focused tests and all 279 PC tests.
 - Fresh final verification passed 224 focused controller/protocol/storage/time tests and all 279 PC tests; source compilation and Git whitespace checks passed. All tests remained fake/local with injected clocks/events and temporary files; no network, PLC, AutoShop session, servo, or hardware was accessed or written.
+
+## Task 8: PySide6 中文 Windows 控制界面
+
+### 完成项
+
+- 新增五区中文操作界面、固定枚举/速度映射、三位小数带符号角度与速度显示、运行/终止/中止状态映射、逐度事件数量及 CSV 保存/重试区域。
+- 软件停止按钮固定为红色“停止（软件）”，明确提示“不能替代实体急停”，在断线、未知状态、运行和停止过程中始终可用；主窗口空格键走相同控制器停止入口。
+- `ControllerBridge` 将控制器工作线程的快照、错误和保存回调经 Qt 信号送回 GUI 线程，界面只调用 `TurntableController`，不直接调用 Modbus。
+- 首次有效 IPv4 连接才创建生产控制器并启动后台工作线程；同 IP 重连复用控制器且不重发启动，断线后更换 IP 会先取消订阅并在 2 秒有界超时内关闭旧控制器。
+- 精确 READY/零点有效/伺服就绪/无缓冲/无待下载/无本地命令错误时才允许启动。已知运动状态、停止状态和本地启动待确认均锁定设置；未知原始状态按未知显示并禁止启动。
+- 设零仅在非运行状态显示中文人工目视对零确认，所有命令错误均使用界面内提示，不在运行/停止过程中弹出阻塞错误对话框。
+- 高级参数第一阶段全部只读并默认收起。该行为按 Task 8 安全简报取代旧实施计划中“确认修改减速比”的表述；总减速比/轴缩放必须与 PLC、AutoShop 一致修改，本版本不伪装参数写入成功。
+- 桌面入口支持可选 `--plc-ip` 预填和 `--data-dir`，但在操作者点击有效 IPv4 的连接按钮之前不构造 Modbus 客户端，也不会猜测或自动连接 PLC。
+
+### 测试先行证据
+
+- 最初聚焦运行得到预期 `ModuleNotFoundError: No module named 'turntable_control.ui'`，证明模块缺失 RED。
+- 五区/停止/高级参数组先得到 4 个构造失败，再完成 4 项 GREEN；状态显示与失效安全组先得到 5 个缺失行为失败，再完成 9 项 GREEN。
+- 连接、命令、设零确认和跨线程桥接组先因缺少 `ControllerBridge` 在收集阶段失败，完成后 16 项通过；目录、关闭和入口组先得到 4 个预期失败，完成后通过。
+- 自审新增“原始整数即使等于已知枚举值也必须显示未知”和“停止取消本地启动待确认锁”两个回归，先得到 2 个失败，修复后聚焦测试通过。
+- 最终聚焦 UI 测试为 `24 passed`，完整 PC 测试为 `303 passed`。所有 UI 测试使用 offscreen Qt、假控制器/工厂、临时目录和假应用。
+
+### 风险、限制与额度检查
+
+- 未访问网络、PLC、AutoShop、伺服或硬件；未验证实际 EtherCAT、方向、机械角度、Windows 字体/缩放、多显示器布局和现场停止距离。
+- 软件停止与通信心跳均不是实体急停或安全等级功能；安装并验证实体急停之前仍只允许空载、人员远离和 1°/s 初始调试。
+- 未执行额度查询；本任务没有外部服务调用。
+
+## Task 8 自审修正：运行断开与首次连接失败清理
+
+- 运行/停止期间继续锁定 IP、连接、模式、方向、速度、设零、上电、复位和高级参数，但只要控制器快照仍为已连接，“断开”按钮保持可用，使操作者可以主动断开通信并由 PLC 心跳保护执行受控停止；软件停止仍始终可用。
+- 首次连接已注册回调且已排队 `connect()` 后，如果后台线程启动失败，界面会立即取消全部三个订阅、调用 2 秒有界 `shutdown()`、丢弃半初始化控制器并恢复可重试状态；清理失败会与原始错误一起显示，不会静默保留失效控制器。
+- 本地命令错误不会被下一次无错误状态轮询静默清除并重新开放启动；操作者修改 IP、模式、方向或速度后才清除该本地错误并重新计算联锁。
+- 三个回归分别先复现运行中断开被禁用、后台启动失败遗留控制器，以及轮询静默清除本地启动错误；最小修正后对应聚焦测试通过。
