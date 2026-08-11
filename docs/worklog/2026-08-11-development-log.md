@@ -99,3 +99,17 @@
 - Focused Task 3 tests: `29 passed in 2.07s`.
 - Full PC tests: `78 passed in 2.10s`.
 - No PLC, network, or hardware access was performed.
+
+## Task 4: Easy521 AutoShop PLC reference source
+
+### Completed work
+
+- Added a five-file AutoShop LiteST reference source set: fixed Modbus/register and motion constants, explicit high-word-first signed-DINT codecs, a 360-record fixed event logger, deterministic command/state control, and `PRG_MAIN` PLCopen call ordering.
+- Added the page-by-page `plc/README.md` guide with the full `D1000..D1206` and `D2000..D4159` INT variable-table binding, EtherNET1/CN3 separation, PDO checks, axis-unit/ratio setup, commissioning limits, and bounded timing/resource constraints.
+- Added source-contract tests first. The initial test run failed as expected because the referenced PLC sources and README did not exist; after implementation, the static contract passes.
+
+### Constraints and limitations
+
+- This is reference source only. AutoShop's installed compiler and firmware-specific type names remain the final authority; no AutoShop compilation is claimed.
+- No network, PLC, servo, download, online operation, or hardware motion was performed.
+- The communication heartbeat and controlled `MC_Stop` are not a physical emergency stop or a safety-rated function.
