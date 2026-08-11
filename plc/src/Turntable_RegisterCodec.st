@@ -29,3 +29,16 @@ iHighWord := INT(SHR(udiBits, 16));
 iLowWord := INT(udiBits AND 16#0000FFFF);
 FC_SplitI32 := TRUE;
 END_FUNCTION
+
+FUNCTION FC_SplitU32 : BOOL
+VAR_INPUT
+    udiValue : UDINT;
+END_VAR
+VAR_OUTPUT
+    iHighWord : INT;
+    iLowWord : INT;
+END_VAR
+iHighWord := INT(SHR(udiValue, 16));
+iLowWord := INT(udiValue AND 16#0000FFFF);
+FC_SplitU32 := TRUE;
+END_FUNCTION

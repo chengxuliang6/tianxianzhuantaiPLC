@@ -95,3 +95,20 @@ def decode_i32(words: Sequence[object]) -> int:
         raise ValueError("each Modbus word must be an unsigned 16-bit integer")
     raw = (high_word << 16) | low_word
     return raw - 0x1_0000_0000 if raw & 0x8000_0000 else raw
+
+
+def encode_u32(value: int) -> tuple[int, int]:
+    """Encode a raw unsigned 32-bit value as high-word-first Modbus words."""
+    if type(value) is not int or not 0 <= value <= 0xFFFF_FFFF:
+        raise ValueError("value must fit in an unsigned 32-bit integer")
+    return (value >> 16) & 0xFFFF, value & 0xFFFF
+
+
+def decode_u32(words: Sequence[object]) -> int:
+    """Decode exactly two high-word-first Modbus registers to a raw u32."""
+    if len(words) != 2:
+        raise ValueError("exactly two Modbus words are required")
+    high_word, low_word = words
+    if any(type(word) is not int or not 0 <= word <= 0xFFFF for word in words):
+        raise ValueError("each Modbus word must be an unsigned 16-bit integer")
+    return (high_word << 16) | low_word

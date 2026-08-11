@@ -40,6 +40,63 @@ def test_stop_done_releases_execute_and_has_priority_over_start() -> None:
     assert controller.index("STOP_SEQ") < controller.index("START_SEQ")
 
 
+def test_stop_discards_pending_start_and_read_fault_stops_before_fault_seal() -> None:
+    controller = source("FB_TurntableControl.st")
+    stop_branch = controller[controller.index("IF uiStopSeq <> uiStopAckSeq"):controller.index("ELSIF bActiveRun")]
+    assert "uiStartAckSeq := uiStartSeq" in stop_branch
+    assert "bPositionReadError" in controller and "bVelocityReadError" in controller
+    assert "bStopRequest := TRUE" in controller
+    assert "bStopDone AND bActiveRun" in controller
+    assert "IF bStopError AND bStopLatched" in controller
+    assert "bUnsafeStopFailure := TRUE" in controller
+
+
+def test_main_has_real_axis_reset_and_latched_accepted_target_publication() -> None:
+    main = source("PRG_MAIN.st")
+    controller = source("FB_TurntableControl.st")
+    assert "MC_Reset(Execute := bResetExecute, Axis := Axis_0" in main
+    assert "Done => bResetDone" in main and "Error => bResetError" in main
+    assert "rAcceptedTargetDeg" in controller
+    assert "rCandidateTargetDeg" in controller
+    assert "rAcceptedTargetDeg := rCandidateTargetDeg" in controller
+    assert "IF bResetPending AND (bResetDone OR bResetError)" in controller
+    assert "uiResetFaultAckSeq := uiResetPendingSeq" in controller
+    assert "rAcceptedTargetDeg * 1000.0" in main
+    assert "rActualPosition + rMoveDistance" not in main
+
+
+def test_logger_keeps_all_crossings_and_encodes_elapsed_as_u32() -> None:
+    logger = source("FB_DegreeLogger.st")
+    codec = source("Turntable_RegisterCodec.st")
+    assert "FOR iCrossing := 1 TO 360" in logger
+    assert "udiElapsedMs : UDINT" in logger
+    assert "FC_SplitU32" in logger and "FC_SplitU32" in codec
+
+
+def test_start_has_a_terminal_ack_freshness_and_latched_parameter_path() -> None:
+    main = source("PRG_MAIN.st")
+    controller = source("FB_TurntableControl.st")
+    assert "uiStartAckSeq := uiStartSeq; bStartAccepted := TRUE" in controller
+    assert "(uiHeartbeatAgeScans > 1000)" in controller
+    assert "OR bUnsafeStopFailure" in controller
+    assert "diRequestedAccelMilli" in controller and "diBacklashMilli <> 0" in controller
+    assert "FC_DecodeI32(iHighWord := iD1012AccelHi" in main
+    assert "FC_DecodeI32(iHighWord := iD1018BacklashHi" in main
+
+
+def test_readme_documents_u32_reset_and_unsafe_stop_response() -> None:
+    readme = (PLC / "README.md").read_text(encoding="utf-8")
+    for token in ("raw u32", "decode_u32", "MC_Reset", "FAULT_STOP_UNSAFE", "4320 bytes", "360-write"):
+        assert token in readme
+
+
+def test_modbus_words_are_globally_declared_once_not_locally_redeclared() -> None:
+    constants = source("Turntable_Constants.st")
+    main = source("PRG_MAIN.st")
+    assert "VAR_GLOBAL" in constants and "iD1000Mode" in constants and "aD2000Events" in constants
+    assert "iD1000Mode," not in main
+
+
 def test_no_immediate_stop_is_called_or_claimed() -> None:
     corpus = "\n".join(path.read_text(encoding="utf-8") for path in PLC.rglob("*") if path.is_file())
     mentions = [line for line in corpus.splitlines() if "MC_ImmediateStop" in line]
@@ -60,7 +117,7 @@ def test_constants_cover_register_contract_motion_contract_and_event_extent() ->
 
 def test_degree_logger_is_bounded_writes_six_words_and_preserves_unacked_buffer() -> None:
     logger = source("FB_DegreeLogger.st")
-    for token in ("ARRAY[0..2159] OF INT", "FOR iCrossing := 1 TO 60", "bBufferReady", "udiNowTickMs - udiRunStartTickMs", "6 * uiEventCount", "uiEventCount < 360"):
+    for token in ("ARRAY[0..2159] OF INT", "FOR iCrossing := 1 TO 360", "bBufferReady", "udiNowTickMs - udiRunStartTickMs", "6 * uiEventCount", "uiEventCount < 360"):
         assert token in logger
 
 

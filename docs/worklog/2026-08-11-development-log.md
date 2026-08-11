@@ -113,3 +113,16 @@
 - This is reference source only. AutoShop's installed compiler and firmware-specific type names remain the final authority; no AutoShop compilation is claimed.
 - No network, PLC, servo, download, online operation, or hardware motion was performed.
 - The communication heartbeat and controlled `MC_Stop` are not a physical emergency stop or a safety-rated function.
+
+## Task 4 review remediation: fail-safe control flow and u32 tick contract
+
+### Completed work
+
+- Reworked PLC reference control flow so feedback/motion faults while active latch a controlled Stop request and retain the run until `MC_Stop.Done`; `MC_Stop.Error` now publishes an unsafe terminal fault, inhibits the reference power-enable output, blocks restart, and preserves unsealed data for on-site assessment.
+- Added a latched accepted target, stop/start race consumption, real `MC_Reset` Done/Error acknowledgement flow, deterministic rejection acknowledgement for every start sequence, stale-heartbeat start rejection, and accepted-run-only acceleration/deceleration latching.
+- Replaced the 60-crossing logger cap with a fixed 360-crossing pass, added raw-u32 tick/event codecs in PLC and PC code, and made the Modbus D-word table globally owned rather than duplicated in `PRG_MAIN`.
+
+### Test-first evidence and limitations
+
+- The reviewer regressions first failed with 20 focused failures (missing u32 codec and required source structures); after remediation, focused source/register tests and the complete PC suite pass.
+- AutoShop compiler, firmware-specific LiteST names, axis scaling, and the 360-write worst-case scan time remain field validation work. No AutoShop compile, PLC, network, servo, download, online operation, or hardware motion was performed.

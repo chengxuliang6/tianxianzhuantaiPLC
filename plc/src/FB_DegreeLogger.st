@@ -32,7 +32,7 @@ VAR
     iTravelAngle : INT;
     iBase : INT;
     diPositionMdeg : DINT;
-    diElapsedMs : DINT;
+    udiElapsedMs : UDINT;
     iPositionHigh : INT;
     iPositionLow : INT;
     iElapsedHigh : INT;
@@ -58,7 +58,7 @@ IF NOT bBufferReady AND NOT bRunStarted THEN
     iLastAngle := MIN(360, REAL_TO_INT(FLOOR(rCurrentTravel)));
 
     (* Fixed guard: at most 60 writes even after a position discontinuity. *)
-    FOR iCrossing := 1 TO 60 DO
+    FOR iCrossing := 1 TO 360 DO
         iTravelAngle := iFirstAngle + iCrossing - 1;
         IF iTravelAngle > iLastAngle THEN
             EXIT;
@@ -68,9 +68,9 @@ IF NOT bBufferReady AND NOT bRunStarted THEN
             rCrossingPosition := rRunOriginDeg + REAL(iDirection) * REAL(iTravelAngle);
             diPositionMdeg := REAL_TO_DINT(rCrossingPosition * 1000.0);
             (* UDINT subtraction intentionally handles the 49.7-day tick wrap. *)
-            diElapsedMs := DINT(udiNowTickMs - udiRunStartTickMs);
+            udiElapsedMs := udiNowTickMs - udiRunStartTickMs;
             FC_SplitI32(diValue := diPositionMdeg, iHighWord => iPositionHigh, iLowWord => iPositionLow);
-            FC_SplitI32(diValue := diElapsedMs, iHighWord => iElapsedHigh, iLowWord => iElapsedLow);
+            FC_SplitU32(udiValue := udiElapsedMs, iHighWord => iElapsedHigh, iLowWord => iElapsedLow);
             aEventWords[iBase + 0] := INT(uiEventCount + 1);
             aEventWords[iBase + 1] := iTravelAngle;
             aEventWords[iBase + 2] := iPositionHigh;

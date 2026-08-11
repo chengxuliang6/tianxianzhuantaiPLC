@@ -5,21 +5,6 @@
 ******************************************************************************)
 PROGRAM PRG_MAIN
 VAR
-    (* Bind each of these INTs to its named D word per plc/README.md. *)
-    iD1000Mode, iD1001Direction, iD1002SpeedIndex : INT;
-    iD1003StartSeq, iD1004StopSeq, iD1005SetZeroSeq, iD1006ResetFaultSeq : INT;
-    iD1007PowerSeq, iD1008Heartbeat, iD1009BufferAckSeq : INT;
-    iD1010RatioHi, iD1011RatioLo, iD1012AccelHi, iD1013AccelLo : INT;
-    iD1014DecelHi, iD1015DecelLo, iD1016StopDecelHi, iD1017StopDecelLo : INT;
-    iD1018BacklashHi, iD1019BacklashLo : INT;
-    iD1100RunState, iD1101StatusFlags, iD1102FaultCode : INT;
-    iD1103PositionHi, iD1104PositionLo, iD1105TargetHi, iD1106TargetLo : INT;
-    iD1107VelocityHi, iD1108VelocityLo, iD1109HeartbeatEcho : INT;
-    iD1110StartAck, iD1111StopAck, iD1112SetZeroAck, iD1113ResetFaultAck : INT;
-    iD1114PowerAck, iD1115BufferAcked, iD1116EventCount, iD1117Generation : INT;
-    iD1118RunStatus, iD1200ProtocolVersion, iD1201WordOrderHi, iD1202WordOrderLo : INT;
-    iD1203TimeSyncRequest, iD1204TickHi, iD1205TickLo, iD1206TimeSyncResponse : INT;
-    aD2000Events : ARRAY[0..2159] OF INT; (* bind D2000:D4159, never DINT *)
     udiPlcTickMs : UDINT;
     rActualPosition, rActualVelocity : REAL;
     rMoveDistance, rSelectedVelocity, rAcceleration, rDeceleration, rStopDeceleration : REAL;
@@ -31,6 +16,8 @@ VAR
     iMoveErrorID : INT;
     bStopExecute, bStopDone, bStopBusy, bStopError : BOOL;
     iStopErrorID : INT;
+    bResetExecute, bResetDone, bResetBusy, bResetError : BOOL;
+    iResetErrorID : INT;
     bPositionValid, bPositionBusy, bPositionError : BOOL;
     iPositionErrorID : INT;
     bVelocityValid, bVelocityBusy, bVelocityError : BOOL;
@@ -40,14 +27,22 @@ VAR
     bLoggerBufferReady : BOOL;
     uiLoggerEventCount, uiLoggerGeneration : UINT;
     diPositionMdeg, diTargetMdeg, diVelocityMdegS : DINT;
-    diTickMs : DINT;
-    iUnusedHi, iUnusedLo : INT;
+    diTotalRatioMilli, diRequestedAccelMilli, diRequestedDecelMilli : DINT;
+    diRequestedStopDecelMilli, diBacklashMilli : DINT;
     fbControl : FB_TurntableControl;
     fbLogger : FB_DegreeLogger;
 END_VAR
 
 (* PRG_MAIN must be scheduled as a constant 1 ms task; tick is not retained. *)
 udiPlcTickMs := udiPlcTickMs + 1;
+
+(* Decode all runtime parameters explicitly. D1010 ratio must match the
+   offline Axis_0 scaling; phase 1 does not perform backlash compensation. *)
+diTotalRatioMilli := FC_DecodeI32(iHighWord := iD1010RatioHi, iLowWord := iD1011RatioLo);
+diRequestedAccelMilli := FC_DecodeI32(iHighWord := iD1012AccelHi, iLowWord := iD1013AccelLo);
+diRequestedDecelMilli := FC_DecodeI32(iHighWord := iD1014DecelHi, iLowWord := iD1015DecelLo);
+diRequestedStopDecelMilli := FC_DecodeI32(iHighWord := iD1016StopDecelHi, iLowWord := iD1017StopDecelLo);
+diBacklashMilli := FC_DecodeI32(iHighWord := iD1018BacklashHi, iLowWord := iD1019BacklashLo);
 
 (* 1. Refresh feedback first. These enables remain TRUE for continuously valid reads. *)
 MC_ReadActualPosition(Enable := TRUE, Axis := Axis_0,
@@ -68,6 +63,9 @@ fbControl(
     uiResetFaultSeq := UINT(iD1006ResetFaultSeq), uiPowerSeq := UINT(iD1007PowerSeq),
     uiHeartbeat := UINT(iD1008Heartbeat), uiBufferAckSeq := UINT(iD1009BufferAckSeq),
     udiNowTickMs := udiPlcTickMs,
+    diTotalRatioMilli := diTotalRatioMilli, diRequestedAccelMilli := diRequestedAccelMilli,
+    diRequestedDecelMilli := diRequestedDecelMilli, diRequestedStopDecelMilli := diRequestedStopDecelMilli,
+    diBacklashMilli := diBacklashMilli,
     rActualPositionDeg := rActualPosition, rActualVelocityDegS := rActualVelocity,
     bPositionValid := bPositionValid, bVelocityValid := bVelocityValid,
     bPositionReadError := bPositionError, bVelocityReadError := bVelocityError,
@@ -75,6 +73,7 @@ fbControl(
     bMoveBusy := bMoveBusy, bMoveAborted := bMoveAborted, bMoveError := bMoveError,
     bStopDone := bStopDone, bStopBusy := bStopBusy, bStopError := bStopError,
     bSetPositionDone := bSetPositionDone, bSetPositionError := bSetPositionError,
+    bResetDone := bResetDone, bResetBusy := bResetBusy, bResetError := bResetError,
     bLoggerBufferReady := bLoggerBufferReady, uiLoggerEventCount := uiLoggerEventCount);
 
 bPowerEnable := fbControl.bPowerEnable;
@@ -89,6 +88,12 @@ MC_SetPosition(Execute := bSetPositionExecute, Axis := Axis_0,
     Done => bSetPositionDone, Busy => bSetPositionBusy,
     Error => bSetPositionError, ErrorID => iSetPositionErrorID);
 bSetPositionExecute := FALSE;
+
+bResetExecute := fbControl.bResetRequest;
+MC_Reset(Execute := bResetExecute, Axis := Axis_0,
+    Done => bResetDone, Busy => bResetBusy,
+    Error => bResetError, ErrorID => iResetErrorID);
+bResetExecute := FALSE;
 
 bMoveExecute := fbControl.bMoveRequest;
 MC_MoveRelative(Execute := bMoveExecute, Axis := Axis_0,
@@ -138,10 +143,10 @@ iD1201WordOrderHi := WORD_ORDER_PROBE_HIGH; iD1202WordOrderLo := WORD_ORDER_PROB
 iD1206TimeSyncResponse := iD1203TimeSyncRequest;
 
 diPositionMdeg := REAL_TO_DINT(rActualPosition * 1000.0);
-diTargetMdeg := REAL_TO_DINT((rActualPosition + rMoveDistance) * 1000.0);
-diVelocityMdegS := REAL_TO_DINT(rActualVelocity * 1000.0); diTickMs := DINT(udiPlcTickMs);
+diTargetMdeg := REAL_TO_DINT(fbControl.rAcceptedTargetDeg * 1000.0);
+diVelocityMdegS := REAL_TO_DINT(rActualVelocity * 1000.0);
 FC_SplitI32(diValue := diPositionMdeg, iHighWord => iD1103PositionHi, iLowWord => iD1104PositionLo);
 FC_SplitI32(diValue := diTargetMdeg, iHighWord => iD1105TargetHi, iLowWord => iD1106TargetLo);
 FC_SplitI32(diValue := diVelocityMdegS, iHighWord => iD1107VelocityHi, iLowWord => iD1108VelocityLo);
-FC_SplitI32(diValue := diTickMs, iHighWord => iD1204TickHi, iLowWord => iD1205TickLo);
+FC_SplitU32(udiValue := udiPlcTickMs, iHighWord => iD1204TickHi, iLowWord => iD1205TickLo);
 END_PROGRAM

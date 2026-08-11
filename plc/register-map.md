@@ -57,7 +57,7 @@
 | 1200 | PROTOCOL_VERSION | u16 | 本合同版本，初始为 `1` |
 | 1201:1202 | WORD_ORDER_PROBE | i32 | 固定 `0x12345678`，先高后低 |
 | 1203 | TIME_SYNC_REQUEST_SEQ | u16 | 电脑发起的时间同步采样序号 |
-| 1204:1205 | PLC_TICK_MS | i32 ms | PLC 单调毫秒计数快照 |
+| 1204:1205 | PLC_TICK_MS | raw u32 ms | PLC 单调毫秒计数快照；高字在前，PC 必须按 u32 解码 |
 | 1206 | TIME_SYNC_RESPONSE_SEQ | u16 | 与快照对应的已响应采样序号 |
 
 ## D2000–D4159：逐度事件缓冲区
@@ -69,6 +69,6 @@
 | 0 | sequence | u16，事件序号 |
 | 1 | travel_angle | u16 °，范围 1–360 |
 | 2:3 | actual_position | i32 ×1000 °，高字在前 |
-| 4:5 | elapsed_ms | i32 ms，高字在前 |
+| 4:5 | elapsed_ms | raw u32 ms，高字在前；PC 必须按 u32 解码 |
 
 PLC 在电脑以 `BUFFER_ACK_SEQ` 确认成功持久化前保留这些记录，下一次测试不得静默覆盖未确认缓冲区。

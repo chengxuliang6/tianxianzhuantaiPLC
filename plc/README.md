@@ -9,14 +9,17 @@ then compile offline to zero errors before considering a download.
 
 `register-map.md` is the sole normative Modbus address contract. Every wire
 register below is one `INT`; do not bind a `DINT` or `REAL` directly to D words.
-Use `FC_DecodeI32`/`FC_SplitI32` for high-word-first signed 32-bit values. Read
+Use `FC_DecodeI32`/`FC_SplitI32` for high-word-first signed 32-bit values and
+`FC_SplitU32` for raw unsigned tick values. Read
 and verify the D1201/D1202 `0x1234`/`0x5678` word-order probe before any hardware
 write. If it differs, stop and correct the single PC codec and this contract.
 
 ## Variable table: MODBUS_D
 
-Create a variable table named `MODBUS_D`. In the AutoShop address column bind
-one `INT` to each address exactly as listed. `NR` means non-retained and `R`
+Create one **global** variable table named `MODBUS_D` by pasting the `VAR_GLOBAL`
+section in `Turntable_Constants.st`. In its AutoShop address column bind one
+`INT` to each address exactly as listed. Do not redeclare these names in
+`PRG_MAIN`. `NR` means non-retained and `R`
 means retained; all Modbus wire words are `NR` so a restart never replays a
 command. Initial values are bit patterns where `16#` notation is shown.
 
@@ -65,15 +68,18 @@ command. Initial values are bit patterns where `16#` notation is shown.
 | D1201 | iD1201WordOrderHi | INT | NR | 16#1234 | word-order probe high word |
 | D1202 | iD1202WordOrderLo | INT | NR | 16#5678 | word-order probe low word |
 | D1203 | iD1203TimeSyncRequest | INT | NR | 0 | PC time-sync request sequence |
-| D1204 | iD1204TickHi | INT | NR | 0 | PLC_TICK_MS high word |
-| D1205 | iD1205TickLo | INT | NR | 0 | PLC_TICK_MS low word |
+| D1204 | iD1204TickHi | INT | NR | 0 | PLC_TICK_MS raw u32 high word |
+| D1205 | iD1205TickLo | INT | NR | 0 | PLC_TICK_MS raw u32 low word |
 | D1206 | iD1206TimeSyncResponse | INT | NR | 0 | echoed time-sync response sequence |
 | D2000:D4159 | aD2000Events[0..2159] | ARRAY[0..2159] OF INT | NR | 0 | 360 records * 6 words, contiguous event array |
 
 The retained items are deliberately **unbound**: `bZeroValid` and the retained
 stop reason in `FB_TurntableControl`. Mark those FB retained variables `R` in
 the POU variable editor if AutoShop requires an explicit retention flag. They
-are not wire registers. A buffer is sealed after a run and is released only by
+are not wire registers. Define only `udiPlcTickMs`, PLCopen feedback/command
+variables, decoded internal parameters, and the two FB instances in the
+`PRG_MAIN` POU variable editor; do not define another MODBUS_D table there. A
+buffer is sealed after a run and is released only by
 a changed `BUFFER_ACK_SEQ` after the PC has durably saved it.
 
 ## Page-by-page AutoShop configuration
@@ -107,8 +113,9 @@ a changed `BUFFER_ACK_SEQ` after the PC has durably saved it.
    timestamp accuracy. During commissioning measure scan overrun and jitter;
    do not infer timing accuracy from a nominal task period.
 
-6. **Variables/POUs page.** Create `MODBUS_D` from the table above, binding the
-   D2000 event array continuously through D4159. Add global constants from
+6. **Variables/POUs page.** Create the one global `MODBUS_D` table from the
+   `VAR_GLOBAL` declarations and table above, binding the D2000 event array
+   continuously through D4159. Add global constants from
    `Turntable_Constants.st`, then FCs from `Turntable_RegisterCodec.st`, then
    FBs `FB_DegreeLogger` and `FB_TurntableControl`, then `PRG_MAIN`. Create its
    `fbControl`/`fbLogger` instances and the configured `Axis_0` instance before
@@ -149,18 +156,44 @@ zero velocity. Invalid direction/mode/speed, read errors, power/motion errors,
 automatic-limit rejection, and communication timeout all publish a fault or
 terminal status; no command waits indefinitely.
 
+`TARGET_POSITION` is the controller's latched accepted target, not actual
+position plus a live distance. It remains available after normal completion;
+after a controlled stop reports Done it is updated to the final actual position.
+A STOP sequence also acknowledges/discards a pending START sequence, so a
+same-scan start cannot launch on the following scan. A position/velocity/motion
+feedback fault while moving latches a controlled `MC_Stop` and only seals the
+run after `MC_Stop.Done`. If `MC_Stop.Error` occurs, the program inhibits its
+power-enable output, publishes `FAULT_STOP_UNSAFE`, and does not seal or clear
+the event buffer automatically. On site: isolate energy using the approved
+machine procedure, prevent access, investigate axis/drive state, and do not
+resume or acknowledge data until the cause and safe standstill are verified.
+
+`RESET_FAULT_SEQ` starts `MC_Reset`; it is intentionally accepted even for an
+axis/motion error while no run is active. `RESET_FAULT_ACK_SEQ` changes only
+after the instruction returns Done or Error. This is not a substitute for a
+physical emergency stop. D1012:D1017 are decoded as signed milli-degrees/s2,
+must be positive, and are latched only when a run is accepted; writes during a
+run do not change it. D1010 must equal the documented 50000 milli ratio and
+match offline `Axis_0` scaling; phase 1 uses that as a configuration consistency
+check, not a runtime scaling change. D1018 backlash must be zero or start is
+rejected, because phase 1 has no verified compensation algorithm.
+
 ## Bounded resource and timing summary
 
-- The event table is fixed at 2160 `INT` words (360 * 6): at least 4.32 kB on
-  a 16-bit `INT` target, and therefore at least 320 bytes, plus bounded control
-  state. No dynamic allocation is used.
-- `FB_DegreeLogger` has one fixed `FOR ... TO 60` crossing guard. At normal
-  10 degrees/s with a 1 ms scan, no more than one degree is crossed in 100
-  scans; the guard only constrains an abnormal discontinuity.
+- The event table is fixed at 2160 `INT` words (360 * 6): 4320 bytes on a
+  16-bit `INT` target, plus bounded control state. No dynamic allocation is
+  used.
+- `FB_DegreeLogger` has one fixed `FOR ... TO 360` crossing guard and retains
+  every legal crossing after a discontinuity. At normal 10 degrees/s with a
+  1 ms scan, no more than one degree is crossed in 100 scans. A 360-write
+  discontinuity can overrun a 1 ms task, so measure its worst case on target
+  during commissioning and treat a scan overrun as a commissioning failure.
 - Keep task/FB nesting shallow: one 1 ms `PRG_MAIN` task with two FB calls and
   two codec FCs. Check scan-overrun/jitter with AutoShop commissioning tools.
-- The unsigned 32-bit tick wraps after about 49.7 days. Unsigned subtraction
-  preserves elapsed time across one wrap; it is non-retained and is a duration,
-  not an absolute clock.
+- The unsigned 32-bit tick wraps after about 49.7 days. D1204:D1205 and event
+  elapsed words are raw high-word-first u32 bit patterns; the PC must use
+  `decode_u32`, not `decode_i32`, so values past 24.85 days do not become
+  negative. Unsigned subtraction preserves elapsed time across one wrap; it is
+  non-retained and is a duration, not an absolute clock.
 - The 1000-scan communication watchdog is bounded but not safety-rated. A
   fault or controlled stop must be verified on the real hardware before use.

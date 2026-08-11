@@ -43,6 +43,8 @@ VAR_GLOBAL CONSTANT
     FAULT_ZERO_INTERLOCK : UINT := 2; FAULT_AUTO_LIMIT : UINT := 3;
     FAULT_MOTION : UINT := 4; FAULT_POSITION_READ : UINT := 5;
     FAULT_VELOCITY_READ : UINT := 6; FAULT_HEARTBEAT : UINT := 7;
+    FAULT_STOP_UNSAFE : UINT := 8; FAULT_AXIS_CONFIG : UINT := 9;
+    FAULT_START_REJECTED : UINT := 10; FAULT_RESET : UINT := 11;
 
     STATUS_ZERO_VALID : UINT := 1; STATUS_POWERED : UINT := 2;
     STATUS_SOFT_LIMIT : UINT := 4; STATUS_BUFFER_READY : UINT := 8;
@@ -62,5 +64,24 @@ VAR_GLOBAL CONSTANT
     AUTO_DISTANCE_DEG : REAL := 360.0;
     HEARTBEAT_TIMEOUT_SCANS : UINT := 1000;
     EVENT_CAPACITY : UINT := 360; EVENT_RECORD_WORDS : UINT := 6;
-    EVENT_WORD_COUNT : UINT := 2160; EVENT_MAX_CROSSINGS_PER_SCAN : UINT := 60;
+    EVENT_WORD_COUNT : UINT := 2160; EVENT_MAX_CROSSINGS_PER_SCAN : UINT := 360;
+END_VAR
+
+(* Create this as the sole global MODBUS_D variable table and bind addresses
+   here. PRG_MAIN consumes these globals; do not redeclare them locally. *)
+VAR_GLOBAL
+    iD1000Mode, iD1001Direction, iD1002SpeedIndex : INT;
+    iD1003StartSeq, iD1004StopSeq, iD1005SetZeroSeq, iD1006ResetFaultSeq : INT;
+    iD1007PowerSeq, iD1008Heartbeat, iD1009BufferAckSeq : INT;
+    iD1010RatioHi, iD1011RatioLo, iD1012AccelHi, iD1013AccelLo : INT;
+    iD1014DecelHi, iD1015DecelLo, iD1016StopDecelHi, iD1017StopDecelLo : INT;
+    iD1018BacklashHi, iD1019BacklashLo : INT;
+    iD1100RunState, iD1101StatusFlags, iD1102FaultCode : INT;
+    iD1103PositionHi, iD1104PositionLo, iD1105TargetHi, iD1106TargetLo : INT;
+    iD1107VelocityHi, iD1108VelocityLo, iD1109HeartbeatEcho : INT;
+    iD1110StartAck, iD1111StopAck, iD1112SetZeroAck, iD1113ResetFaultAck : INT;
+    iD1114PowerAck, iD1115BufferAcked, iD1116EventCount, iD1117Generation : INT;
+    iD1118RunStatus, iD1200ProtocolVersion, iD1201WordOrderHi, iD1202WordOrderLo : INT;
+    iD1203TimeSyncRequest, iD1204TickHi, iD1205TickLo, iD1206TimeSyncResponse : INT;
+    aD2000Events : ARRAY[0..2159] OF INT;
 END_VAR

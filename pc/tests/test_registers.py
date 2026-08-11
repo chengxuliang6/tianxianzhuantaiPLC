@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from turntable_control import registers
-from turntable_control.registers import Register, decode_i32, encode_i32
+from turntable_control.registers import (
+    Register,
+    decode_i32,
+    encode_i32,
+)
 
 
 @pytest.mark.parametrize(
@@ -16,6 +20,36 @@ def test_i32_round_trip_uses_high_word_first(value: int) -> None:
 
 def test_i32_magic_probe_is_encoded_high_word_first() -> None:
     assert encode_i32(0x12345678) == (0x1234, 0x5678)
+
+
+@pytest.mark.parametrize("value", [0, 1, 0x7FFF_FFFF, 0x8000_0000, 0xFFFF_FFFF])
+def test_u32_round_trip_preserves_tick_bit_patterns_past_signed_range(value: int) -> None:
+    encode = getattr(registers, "encode_u32", None)
+    decode = getattr(registers, "decode_u32", None)
+    assert callable(encode) and callable(decode)
+    assert decode(encode(value)) == value
+
+
+def test_u32_tick_uses_high_word_first_without_signed_conversion() -> None:
+    encode = getattr(registers, "encode_u32", None)
+    assert callable(encode)
+    assert encode(0xFEDC_BA98) == (0xFEDC, 0xBA98)
+
+
+@pytest.mark.parametrize("value", [-1, 0x1_0000_0000, True, 1.0])
+def test_encode_u32_rejects_non_u32_values(value: object) -> None:
+    encode = getattr(registers, "encode_u32", None)
+    assert callable(encode)
+    with pytest.raises(ValueError):
+        encode(value)
+
+
+@pytest.mark.parametrize("words", [(), (1,), (1, 2, 3), (-1, 0), (0, 0x10000), (True, 0)])
+def test_decode_u32_requires_two_legal_unsigned_words(words: tuple[object, ...]) -> None:
+    decode = getattr(registers, "decode_u32", None)
+    assert callable(decode)
+    with pytest.raises(ValueError):
+        decode(words)
 
 
 @pytest.mark.parametrize("value", [-(2**31) - 1, 2**31])
