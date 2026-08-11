@@ -68,3 +68,20 @@
 ## 额度检查
 
 未执行额度查询；本任务不涉及用量阈值或外部服务调用。
+
+## Task 3: Deterministic simulator and degree-event buffer
+
+### Completed work
+
+- Added a hardware-free deterministic motion simulator consuming the Task 2 domain contract.
+- Added immutable per-degree events, interpolation-based millisecond timestamps, 360-event retention, acknowledgement protection, motion profiles, soft limits, manual/automatic modes, controlled stops, and heartbeat aborts.
+- Added focused tests for degree crossings, profiles, soft limits, stops, heartbeat behavior, validation, and repeatability.
+
+### Test-first evidence
+
+- Initial command: `.\\.venv\\Scripts\\python.exe -m pytest pc/tests/test_degree_events.py pc/tests/test_simulator_motion.py -q`
+- Initial result: expected collection failure, `ModuleNotFoundError: No module named 'turntable_control.simulator'`.
+
+### Constraints
+
+- No PLC, network, or hardware access was performed.
