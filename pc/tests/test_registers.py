@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from turntable_control import registers
 from turntable_control.registers import Register, decode_i32, encode_i32
 
 
@@ -29,6 +30,20 @@ def test_decode_i32_requires_exactly_two_words(words: tuple[int, ...]) -> None:
         decode_i32(words)
 
 
+@pytest.mark.parametrize(
+    "words",
+    [(-1, 0), (0x10000, 0), (0, -1), (0, 0x10000), (1.0, 0), (0, "1"), (True, 0)],
+)
+def test_decode_i32_rejects_malformed_unsigned_16_bit_words(words: tuple[object, object]) -> None:
+    with pytest.raises(ValueError):
+        decode_i32(words)
+
+
+def test_register_iteration_contains_only_allocated_modbus_addresses() -> None:
+    assert all(1000 <= address <= 1299 or address == Register.EVENT_BUFFER_BASE for address in Register)
+    assert {6, 360}.isdisjoint(set(Register))
+
+
 def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() -> None:
     command_addresses = [
         Register.MODE,
@@ -41,6 +56,16 @@ def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() ->
         Register.POWER_SEQ,
         Register.HEARTBEAT,
         Register.BUFFER_ACK_SEQ,
+        Register.TOTAL_RATIO_HI,
+        Register.TOTAL_RATIO_LO,
+        Register.ACCELERATION_HI,
+        Register.ACCELERATION_LO,
+        Register.DECELERATION_HI,
+        Register.DECELERATION_LO,
+        Register.SOFTWARE_STOP_DECELERATION_HI,
+        Register.SOFTWARE_STOP_DECELERATION_LO,
+        Register.BACKLASH_COMPENSATION_HI,
+        Register.BACKLASH_COMPENSATION_LO,
     ]
     status_addresses = [
         Register.RUN_STATE,
@@ -80,6 +105,6 @@ def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() ->
         set(command_addresses + status_addresses + protocol_addresses)
     )
     assert Register.EVENT_BUFFER_BASE == 2000
-    assert Register.EVENT_RECORD_WORDS == 6
-    assert Register.EVENT_RECORD_COUNT == 360
+    assert registers.EVENT_RECORD_WORDS == 6
+    assert registers.EVENT_RECORD_COUNT == 360
     assert Register.event_last_address() == 4159

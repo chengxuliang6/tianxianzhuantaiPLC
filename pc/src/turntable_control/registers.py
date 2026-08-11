@@ -10,6 +10,10 @@ from enum import IntEnum
 from typing import Sequence
 
 
+EVENT_RECORD_WORDS = 6
+EVENT_RECORD_COUNT = 360
+
+
 class Register(IntEnum):
     """0-based Modbus holding-register addresses, equal to PLC D numbers."""
 
@@ -67,13 +71,11 @@ class Register(IntEnum):
 
     # D2000-D4159 event buffer block
     EVENT_BUFFER_BASE = 2000
-    EVENT_RECORD_WORDS = 6
-    EVENT_RECORD_COUNT = 360
 
     @classmethod
     def event_last_address(cls) -> int:
         """Return the final address in the fixed 360-record event buffer."""
-        return cls.EVENT_BUFFER_BASE + cls.EVENT_RECORD_WORDS * cls.EVENT_RECORD_COUNT - 1
+        return cls.EVENT_BUFFER_BASE + EVENT_RECORD_WORDS * EVENT_RECORD_COUNT - 1
 
 
 def encode_i32(value: int) -> tuple[int, int]:
@@ -84,9 +86,12 @@ def encode_i32(value: int) -> tuple[int, int]:
     return (raw >> 16) & 0xFFFF, raw & 0xFFFF
 
 
-def decode_i32(words: Sequence[int]) -> int:
+def decode_i32(words: Sequence[object]) -> int:
     """Decode exactly two high-word-first unsigned Modbus registers to an i32."""
     if len(words) != 2:
         raise ValueError("exactly two Modbus words are required")
-    raw = ((words[0] & 0xFFFF) << 16) | (words[1] & 0xFFFF)
+    high_word, low_word = words
+    if any(type(word) is not int or not 0 <= word <= 0xFFFF for word in words):
+        raise ValueError("each Modbus word must be an unsigned 16-bit integer")
+    raw = (high_word << 16) | low_word
     return raw - 0x1_0000_0000 if raw & 0x8000_0000 else raw
