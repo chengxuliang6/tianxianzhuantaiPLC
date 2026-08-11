@@ -319,7 +319,7 @@ def test_only_one_start_can_be_queued_or_in_flight_before_plc_confirmation() -> 
     assert ("send_start", Mode.MANUAL, Direction.CCW, 4) not in client.calls
 
 
-def test_exact_plc_start_confirmation_releases_pending_guard() -> None:
+def test_exact_plc_start_confirmation_keeps_active_session_guard_until_sealed() -> None:
     client = FakeClient()
     clock = FakeClock()
     controller = make_controller(client, clock=clock)
@@ -334,14 +334,42 @@ def test_exact_plc_start_confirmation_releases_pending_guard() -> None:
     )
     clock.advance(100)
     controller.process_once()
-    client.status = ready_status()
+    client.status = ready_status(start_ack_seq=1, run_start_plc_ms=123)
     clock.advance(100)
     controller.process_once()
 
-    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    with pytest.raises(CommandRejected, match="运行会话"):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+
+    assert controller._issued_start_seq is None
+    assert controller._run_session is not None
+    assert [call[0] for call in client.calls].count("send_start") == 1
+
+
+def test_confirmed_running_session_reports_missing_terminal_evidence() -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.status = ready_status(
+        run_state=RunState.AUTO_RUNNING,
+        run_status=RunStatus.RUNNING,
+        start_ack_seq=1,
+        run_start_plc_ms=123,
+    )
+    clock.advance(100)
+    controller.process_once()
+    client.status = ready_status(start_ack_seq=1, run_start_plc_ms=123)
+    clock.advance(100)
+
     controller.process_once()
 
-    assert ("send_start", Mode.MANUAL, Direction.CCW, 4) in client.calls
+    assert controller._run_session is not None
+    assert "terminal" in (controller.snapshot.last_error or "")
+    with pytest.raises(CommandRejected):
+        controller.start(Mode.MANUAL, Direction.CCW, 5.0)
 
 
 def test_incoherent_exact_start_ack_does_not_release_issued_guard() -> None:
@@ -468,6 +496,54 @@ def test_confirmed_running_stop_clears_barrier_after_terminal_save_and_ack(tmp_p
 
     assert [call[0] for call in client.calls].count("save_run") == 1
     assert [call[0] for call in client.calls].count("acknowledge_buffer") == 1
+    assert [call[0] for call in client.calls].count("send_start") == 2
+
+
+def test_stop_after_saved_terminal_session_uses_idle_barrier(tmp_path: Path) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.MANUAL, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=41,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+    client.status = ready_status(
+        start_ack_seq=1,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+
+    controller.stop()
+    controller.process_once()
+    client.status = ready_status(
+        start_ack_seq=1,
+        stop_ack_seq=1,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("save_run") == 1
+    assert [call[0] for call in client.calls].count("acknowledge_buffer") == 1
+    assert [call[0] for call in client.calls].count("send_stop") == 1
     assert [call[0] for call in client.calls].count("send_start") == 2
 
 
@@ -1005,6 +1081,82 @@ def test_exact_unknown_start_clears_only_when_command_was_definitely_not_written
     assert [call[0] for call in client.calls].count("send_start") == 2
 
 
+def test_uncertain_reconciliation_cannot_silently_clear_a_concurrent_start() -> None:
+    clear_entered = Event()
+    release_clear = Event()
+
+    class BlockingUncertainClearController(TurntableController):
+        block_uncertain_clear = False
+
+        def __setattr__(self, name: str, value: object) -> None:
+            super().__setattr__(name, value)
+            if name == "_uncertain_start" and value is None and self.block_uncertain_clear:
+                self.block_uncertain_clear = False
+                clear_entered.set()
+                assert release_clear.wait(1.0)
+
+    client = FakeClient()
+    clock = FakeClock()
+    controller = BlockingUncertainClearController(
+        client,
+        FakeStore(),
+        ClockSynchronizer(),
+        epoch_ms=lambda: clock.epoch,
+        monotonic_ms=lambda: clock.monotonic,
+    )
+    connected = Event()
+    disconnected = Event()
+    second_issued = Event()
+
+    def observe(snapshot: ControllerSnapshot) -> None:
+        if snapshot.connected:
+            connected.set()
+        else:
+            disconnected.set()
+        if snapshot.active_test_id is not None:
+            second_issued.set()
+
+    controller.on_snapshot(observe)
+    controller.connect()
+    controller.start_background()
+    assert connected.wait(1.0)
+    disconnected.clear()
+    client.fail_next["send_start"] = StartOutcomeUnknown("start response lost", 1)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller._wake.set()
+    assert disconnected.wait(1.0)
+    client.observed_start_command_seq = 0
+    client.status = ready_status(start_ack_seq=0)
+    controller.block_uncertain_clear = True
+    controller.connect()
+    controller._wake.set()
+    assert clear_entered.wait(1.0)
+    start_done = Event()
+    start_errors: list[Exception] = []
+
+    def concurrent_start() -> None:
+        try:
+            controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+        except Exception as error:
+            start_errors.append(error)
+        finally:
+            start_done.set()
+
+    thread = Thread(target=concurrent_start)
+    thread.start()
+    try:
+        assert not start_done.wait(0.1)
+    finally:
+        release_clear.set()
+        thread.join(1.0)
+
+    assert start_done.is_set()
+    assert start_errors == []
+    assert second_issued.wait(1.0)
+    controller.shutdown(timeout=1.0)
+    assert [call[0] for call in client.calls].count("send_start") == 2
+
+
 def test_exact_unknown_start_stays_blocked_while_command_is_pending_in_d1003() -> None:
     client = FakeClient()
     controller = make_controller(client)
@@ -1505,6 +1657,58 @@ def test_ack_uncertainty_reconnects_and_reuses_durable_file_without_resave(tmp_p
     assert [call[0] for call in client.calls].count("acknowledge_buffer") == 2
     assert controller.snapshot.saved_csv == durable
     assert not controller.snapshot.download_pending
+
+
+def test_ack_uncertainty_with_cleared_buffer_seals_session_for_later_stop(tmp_path: Path) -> None:
+    from turntable_control.modbus_client import CommunicationError
+
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    controller = make_controller(
+        client,
+        clock=clock,
+        sync=sync,
+        store=FakeStore(tmp_path, client.calls),
+    )
+    connect_controller(controller)
+    controller.start(Mode.MANUAL, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=52,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    client.fail_next["acknowledge_buffer"] = CommunicationError("ack response lost")
+    clock.advance(100)
+    controller.process_once()
+    assert not controller.snapshot.connected
+    client.status = ready_status(
+        start_ack_seq=1,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    controller.connect()
+    controller.process_once()
+
+    assert controller._run_session is None
+    assert controller._durable_recovery is None
+    assert not controller.snapshot.download_pending
+    controller.stop()
+    controller.process_once()
+    client.status = replace(client.status, stop_ack_seq=1)
+    clock.advance(100)
+    controller.process_once()
+    controller.start(Mode.MANUAL, Direction.CCW, 5.0)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls].count("save_run") == 1
+    assert [call[0] for call in client.calls].count("send_start") == 2
 
 
 @pytest.mark.parametrize(

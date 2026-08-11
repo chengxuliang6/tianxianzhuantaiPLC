@@ -242,3 +242,17 @@
 - R1 RED cases exposed the missing client command-side sequence and premature clearing for D1003-pending and exact-ACK/READY-IDLE snapshots. R2 RED cases saved impossible mode/status pairs and ACKed a recovery snapshot with mismatched run state. R3 callback and barrier tests reproduced START after STOP/disconnect. R4 reproduced caller-side pump ownership after background reservation. R5 reproduced replacement START before both acknowledgements and stopped state.
 - Fresh final verification passed 220 focused controller/protocol/storage/time tests and all 275 PC tests; source compilation and Git whitespace checks passed. The independent read-only final review reran 168 focused tests and all 275 PC tests and reported no remaining Critical, Important, or Minor findings.
 - All tests use in-memory fakes, injected clocks/barriers, and temporary local files. No PLC, network endpoint, AutoShop session, servo, or hardware was accessed or written.
+
+## Task 7 final closure: explicit session finalization
+
+### Completed work
+
+- Kept a confirmed run session active after its issued START acknowledgement, so a contradictory exact-ACK READY/IDLE/no-buffer snapshot is reported as missing terminal evidence and cannot authorize a replacement START.
+- Added an explicit session-sealing transition after a durable CSV buffer acknowledgement succeeds, or after reconnect proves an uncertain acknowledgement already cleared the PLC buffer. Sealing clears the historical active session and reduces any still-pending STOP to a stop-only acknowledgement barrier.
+- Serialized uncertain-START reconciliation under the controller lock. Definite non-write, explicit rejection, and coherent reconstruction now commit uncertainty/session/pending-command state atomically, so a concurrent public START cannot return successfully and then be silently discarded.
+
+### Test-first evidence and constraints
+
+- RED regressions reproduced replacement START after confirmed RUNNING evidence disappeared, a permanent STOP barrier after normal save/ACK, the same lifecycle wedge after an uncertain ACK whose buffer was already cleared, and a barrier-controlled concurrent START being erased by uncertain reconciliation.
+- The independent latest-tree review reported SF1, SF2, and QF1 closed with no remaining Critical, Important, or Minor findings; its fresh runs passed 172 focused tests and all 279 PC tests.
+- Fresh final verification passed 224 focused controller/protocol/storage/time tests and all 279 PC tests; source compilation and Git whitespace checks passed. All tests remained fake/local with injected clocks/events and temporary files; no network, PLC, AutoShop session, servo, or hardware was accessed or written.

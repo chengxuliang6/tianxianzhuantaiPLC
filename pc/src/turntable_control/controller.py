@@ -236,6 +236,8 @@ class TurntableController:
                 raise CommandRejected("启动命令正在等待PLC确认")
             if self._pending_start is not None:
                 raise CommandRejected("启动命令正在等待PLC确认")
+            if self._run_session is not None:
+                raise CommandRejected("当前运行会话尚未封存，禁止新START")
             command = self._validated_start(mode, direction, speed_deg_s, self._snapshot)
             self._pending_start = command
             try:
@@ -488,6 +490,9 @@ class TurntableController:
         session_error: str | None = None
         reconciliation_error, reconciled_test_id = self._reconcile_uncertain_start(status)
         cancellation_error = self._reconcile_start_cancellation(status)
+        recovery = self._durable_recovery
+        if recovery is not None and not status.status_flags & STATUS_BUFFER_READY:
+            self._seal_run_session(recovery.session_token)
         pending = self._pending_sync
         if pending is not None and status.time_sync_response_seq == pending[0]:
             self._pending_sync = None
@@ -497,7 +502,20 @@ class TurntableController:
                 sync_error = f"clock synchronization sample rejected: {error}"
         session = self._run_session
         terminal = status.run_status in _TERMINAL_RUN_STATUSES
-        if session is not None and (status.run_status is RunStatus.RUNNING or terminal):
+        confirmed_missing_terminal = (
+            session is not None
+            and session.run_start_plc_ms is not None
+            and status.start_ack_seq == session.start_seq
+            and status.run_state is RunState.READY
+            and status.run_status is RunStatus.IDLE
+            and not status.status_flags & STATUS_BUFFER_READY
+        )
+        if confirmed_missing_terminal:
+            session_error = (
+                "PLC active session terminal evidence is incoherent: "
+                f"{self._terminal_coherence_error(status, session.mode)}"
+            )
+        elif session is not None and (status.run_status is RunStatus.RUNNING or terminal):
             if status.start_ack_seq == session.start_seq:
                 buffer_ready = bool(status.status_flags & STATUS_BUFFER_READY)
                 expected_running_state = (
@@ -623,6 +641,12 @@ class TurntableController:
         return None
 
     def _reconcile_uncertain_start(self, status: StatusSnapshot) -> tuple[str | None, str | None]:
+        with self._lock:
+            return self._reconcile_uncertain_start_locked(status)
+
+    def _reconcile_uncertain_start_locked(
+        self, status: StatusSnapshot
+    ) -> tuple[str | None, str | None]:
         uncertain = self._uncertain_start
         if uncertain is None:
             return None, None
@@ -701,6 +725,7 @@ class TurntableController:
         recovery = self._durable_recovery
         if recovery is not None:
             if not buffer_ready:
+                self._seal_run_session(recovery.session_token)
                 self._handled_generations.add(recovery.generation)
                 self._durable_recovery = None
                 self._publish(replace(self.snapshot, download_pending=False, active_test_id=None))
@@ -831,9 +856,30 @@ class TurntableController:
             return
         self._ack_attempts.add(key)
         self._client.acknowledge_buffer()
+        self._seal_run_session(recovery.session_token)
         self._handled_generations.add(recovery.generation)
         self._durable_recovery = None
         self._publish(replace(self.snapshot, download_pending=False, active_test_id=None, last_error=None))
+
+    def _seal_run_session(self, session_token: int) -> None:
+        with self._lock:
+            session = self._run_session
+            if session is None or session.session_token != session_token:
+                return
+            self._run_session = None
+            if self._issued_start_seq == session.start_seq:
+                self._issued_start_seq = None
+            cancellation = self._start_cancellation
+            if (
+                cancellation is not None
+                and cancellation.require_terminal
+                and cancellation.start_seq == session.start_seq
+            ):
+                self._start_cancellation = _StartCancellation(
+                    start_seq=None,
+                    mode=None,
+                    stop_seq=cancellation.stop_seq,
+                )
 
     def _download_failed(self, message: str) -> None:
         self._publish(replace(self.snapshot, download_pending=True, last_error=message))
