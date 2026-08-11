@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from fractions import Fraction
+
 import pytest
 
-from turntable_control.time_sync import ClockNotSynchronized, ClockSynchronizer
+from turntable_control.time_sync import ClockNotSynchronized, ClockSynchronizer, _round_half_away_from_zero
 
 
 def test_clock_sync_prefers_lowest_round_trip_sample() -> None:
@@ -81,6 +83,26 @@ def test_clock_sync_rounds_midpoint_halves_away_from_zero() -> None:
     negative = ClockSynchronizer()
     negative.add_sample(pc_send_ms=0, plc_ms=1, pc_recv_ms=0)
     assert negative.to_epoch_ms(0) == -1
+
+
+def test_clock_sync_retains_an_exact_large_half_midpoint_reviewer_regression() -> None:
+    sync = ClockSynchronizer()
+    sample = sync.add_sample(pc_send_ms=2**53 + 1, plc_ms=0, pc_recv_ms=2**53 + 2)
+
+    assert sample.midpoint_ms == Fraction(2**54 + 3, 2)
+    assert sample.offset_ms == Fraction(2**54 + 3, 2)
+    assert sync.to_epoch_ms(0) == 2**53 + 2
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (Fraction(2**80 * 2 + 1, 2), 2**80 + 1),
+        (Fraction(-(2**80 * 2 + 1), 2), -(2**80 + 1)),
+    ],
+)
+def test_half_away_rounding_is_exact_for_large_positive_and_negative_halves(value: Fraction, expected: int) -> None:
+    assert _round_half_away_from_zero(value) == expected
 
 
 def test_nearby_tick_conversions_are_monotonic() -> None:

@@ -164,3 +164,16 @@
 
 - The focused tests were run before either production module existed and failed at collection only because `turntable_control.time_sync` and `turntable_control.csv_store` were absent.
 - No real network, PLC, hardware, buffer acknowledgement, or client communication was accessed or performed.
+
+## Task 6 review remediation: evidence claim locking and exact timestamps
+
+### Completed work
+
+- Added per-test-id exclusive lock claims held from the final-file check through temporary write, fsync, and atomic replace. The process that acquired the lock always closes and removes it; a crash-surviving lock requires explicit operator inspection and manual recovery.
+- Made CSV run metadata require the exact domain `Mode`, `Direction`, and `RunStatus` enum instances and export their safe enum names rather than arbitrary text.
+- Replaced floating-point clock midpoint/offset arithmetic with exact `Fraction` values and exact half-away-from-zero rounding for very large positive and negative values.
+
+### Test-first evidence and constraints
+
+- Reviewer regression tests first failed against the prior implementation: concurrent CSV saves had no exclusive claim, arbitrary string metadata was accepted, and midpoint/rounding lost precision at values larger than `2**53`.
+- Added two interleaved thread tests, final-plus-stale-lock behavior, strict metadata validation, and exact large-value rounding coverage. No real network, PLC, hardware, buffer acknowledgement, or client communication was accessed or performed.

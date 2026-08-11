@@ -8,6 +8,7 @@ guarantee.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 
 
 _U32_MAX = 0xFFFF_FFFF
@@ -26,9 +27,9 @@ class ClockSample:
     plc_ms: int
     pc_send_ms: int
     pc_recv_ms: int
-    midpoint_ms: float
+    midpoint_ms: Fraction
     round_trip_ms: int
-    offset_ms: float
+    offset_ms: Fraction
 
 
 class ClockSynchronizer:
@@ -56,7 +57,7 @@ class ClockSynchronizer:
         if pc_recv_ms < pc_send_ms:
             raise ValueError("pc_recv_ms must not precede pc_send_ms")
 
-        midpoint_ms = (pc_send_ms + pc_recv_ms) / 2
+        midpoint_ms = Fraction(pc_send_ms + pc_recv_ms, 2)
         sample = ClockSample(
             plc_ms=plc_ms,
             pc_send_ms=pc_send_ms,
@@ -104,6 +105,10 @@ def _signed_u32_delta(value: int, reference: int) -> int:
     return delta - _U32_MODULUS if delta >= _HALF_RANGE else delta
 
 
-def _round_half_away_from_zero(value: float) -> int:
+def _round_half_away_from_zero(value: Fraction | int) -> int:
     """Round to the nearest millisecond; exact halves go away from zero."""
-    return int(value + 0.5) if value >= 0 else -int(-value + 0.5)
+    fraction = Fraction(value)
+    magnitude, remainder = divmod(abs(fraction.numerator), fraction.denominator)
+    if remainder * 2 >= fraction.denominator:
+        magnitude += 1
+    return magnitude if fraction.numerator >= 0 else -magnitude

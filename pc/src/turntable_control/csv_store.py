@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 
+from .domain import Direction, Mode, RunStatus
 from .time_sync import ClockSynchronizer
 
 
@@ -52,14 +53,14 @@ class CsvSaveError(RuntimeError):
 @dataclass(frozen=True)
 class RunMetadata:
     test_id: str
-    mode: object
-    direction: object
+    mode: Mode
+    direction: Direction
     speed_deg_s: float
     total_ratio: float
     acceleration_deg_s2: float
     deceleration_deg_s2: float
     stop_deceleration_deg_s2: float
-    run_status: object
+    run_status: RunStatus
     run_start_plc_ms: int
     saved_at_epoch_ms: int
 
@@ -71,7 +72,13 @@ class RunExport:
 
 
 class CsvStore:
-    """Persist one validated run as a BOM-prefixed CSV without overwriting evidence."""
+    """Persist one validated run as a BOM-prefixed CSV without overwriting evidence.
+
+    A surviving ``<test_id>.csv.lock`` means a process may have crashed while
+    publishing.  Operators must first verify that no writer is active and
+    inspect any retained ``.tmp`` and final evidence before manually removing
+    that lock; automatic stale-lock deletion would risk overwriting evidence.
+    """
 
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
@@ -83,15 +90,23 @@ class CsvStore:
             root = self._root.resolve()
             final_path = (root / f"{metadata.test_id}.csv").resolve()
             temp_path = (root / f"{metadata.test_id}.csv.tmp").resolve()
-            if final_path.parent != root or temp_path.parent != root:
+            lock_path = (root / f"{metadata.test_id}.csv.lock").resolve()
+            if final_path.parent != root or temp_path.parent != root or lock_path.parent != root:
                 raise CsvSaveError("export path escapes the configured root")
         except CsvSaveError:
             raise
         except Exception as error:
             raise CsvSaveError(f"invalid run export: {error}") from error
 
+        lock_fd: int | None = None
         try:
             root.mkdir(parents=True, exist_ok=True)
+            try:
+                lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError as error:
+                raise CsvSaveError(
+                    f"CSV lock exists for {metadata.test_id!r}; inspect retained evidence and remove a stale lock manually"
+                ) from error
             if final_path.exists():
                 raise CsvSaveError(f"refusing to overwrite existing CSV: {final_path.name}")
             with temp_path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -106,6 +121,15 @@ class CsvStore:
             raise
         except Exception as error:
             raise CsvSaveError(f"failed to save {metadata.test_id!r}: {error}") from error
+        finally:
+            if lock_fd is not None:
+                try:
+                    os.close(lock_fd)
+                finally:
+                    try:
+                        os.unlink(lock_path)
+                    except FileNotFoundError:
+                        pass
 
 
 def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[RunMetadata, list[dict[str, str]]]:
@@ -114,6 +138,12 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
     metadata = run.metadata
     if type(metadata.test_id) is not str or not _SAFE_TEST_ID.fullmatch(metadata.test_id):
         raise CsvSaveError("test_id must be 1..80 ASCII letters, digits, underscores, or hyphens")
+    if type(metadata.mode) is not Mode:
+        raise CsvSaveError("mode must be a Mode enum member")
+    if type(metadata.direction) is not Direction:
+        raise CsvSaveError("direction must be a Direction enum member")
+    if type(metadata.run_status) is not RunStatus:
+        raise CsvSaveError("run_status must be a RunStatus enum member")
     _validate_u32(metadata.run_start_plc_ms, "run_start_plc_ms")
     if type(metadata.saved_at_epoch_ms) is not int:
         raise CsvSaveError("saved_at_epoch_ms must be an integer")
@@ -151,14 +181,14 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
         rows.append(
             {
                 "test_id": metadata.test_id,
-                "mode": _format_value(metadata.mode),
-                "direction": _format_value(metadata.direction),
+                "mode": metadata.mode.name,
+                "direction": metadata.direction.name,
                 "speed_deg_s": _format_decimal(metadata.speed_deg_s),
                 "total_ratio": _format_decimal(metadata.total_ratio),
                 "acceleration_deg_s2": _format_decimal(metadata.acceleration_deg_s2),
                 "deceleration_deg_s2": _format_decimal(metadata.deceleration_deg_s2),
                 "stop_deceleration_deg_s2": _format_decimal(metadata.stop_deceleration_deg_s2),
-                "run_status": _format_value(metadata.run_status),
+                "run_status": metadata.run_status.name,
                 "run_start_plc_ms": str(metadata.run_start_plc_ms),
                 "saved_at_epoch_ms": str(metadata.saved_at_epoch_ms),
                 "best_rtt_ms": str(best.round_trip_ms),
@@ -181,10 +211,6 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
 def _validate_u32(value: object, field: str) -> None:
     if type(value) is not int or not 0 <= value <= _U32_MAX:
         raise CsvSaveError(f"{field} must be a raw unsigned 32-bit integer")
-
-
-def _format_value(value: object) -> str:
-    return str(getattr(value, "value", value))
 
 
 def _format_decimal(value: object) -> str:
