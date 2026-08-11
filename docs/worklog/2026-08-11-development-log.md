@@ -126,3 +126,16 @@
 
 - The reviewer regressions first failed with 20 focused failures (missing u32 codec and required source structures); after remediation, focused source/register tests and the complete PC suite pass.
 - AutoShop compiler, firmware-specific LiteST names, axis scaling, and the 360-write worst-case scan time remain field validation work. No AutoShop compile, PLC, network, servo, download, online operation, or hardware motion was performed.
+
+## Task 5: Safe Modbus TCP client
+
+### Completed work
+
+- Added a lock-protected synchronous pymodbus 3.14 adapter with an injectable deterministic fake transport for all tests.
+- Added read-only protocol and word-order probing before writes, typed status/event decoding, 120-word event chunks, and per-command u16 sequence tracking with reconnects that never replay commands.
+- Added fixed phase-1 start parameters, direct software-stop writes, heartbeat validation, buffer acknowledgement and time-sync sequence support. The software stop is not an emergency stop.
+
+### Test-first evidence and constraints
+
+- The new focused test suite was run before the module existed and produced the expected 16 failures, all due to `ModuleNotFoundError: turntable_control.modbus_client`.
+- After implementation, the focused suite and complete PC suite pass using only the in-memory fake transport. No real network, PLC, servo, or other hardware access was performed.
