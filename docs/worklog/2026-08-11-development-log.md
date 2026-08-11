@@ -151,3 +151,16 @@
 ### Constraint
 
 - An ambiguous START response must be reconciled by reconnecting and checking PLC state. It must never be blindly retried. No real network, PLC, servo, or hardware access was performed.
+
+## Task 6: PLC time conversion and durable CSV export
+
+### Completed work
+
+- Added bounded lowest-RTT clock sampling with midpoint offsets, deterministic newest-tie selection, raw-u32 wrap handling, explicit half-range rejection, and run-start-plus-elapsed conversion.
+- Added validated BOM-prefixed CSV export with UTC and China (`+08:00`) timestamps, fixed decimal formatting, root containment, non-overwrite protection, and flush/fsync/atomic-replace durability handling.
+- Added focused tests for timing, input validation, event ordering, CSV content, atomic failure preservation, and no communication/acknowledgement dependency.
+
+### Test-first evidence and constraints
+
+- The focused tests were run before either production module existed and failed at collection only because `turntable_control.time_sync` and `turntable_control.csv_store` were absent.
+- No real network, PLC, hardware, buffer acknowledgement, or client communication was accessed or performed.
