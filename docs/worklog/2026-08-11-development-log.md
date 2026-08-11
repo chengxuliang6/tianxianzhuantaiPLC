@@ -18,17 +18,17 @@
 ## 验证证据
 
 - 初始测试使用环境中可用的 Python 3.11/pytest 运行，因 `turntable_control` 尚不存在而得到预期的 `ModuleNotFoundError`。
-- 实现 `__version__ = "0.1.0"` 后，以可编辑安装方式运行 `pc/tests/test_smoke.py`，结果为 `1 passed`；该次本地验证使用 Python 3.11 并显式跳过项目的 Python 版本限制，不能替代 Python 3.12 的正式验证。
+- 已使用 Codex bundled Python 3.12.13 重建仓库根目录 `.venv`，并完成 `-e "pc[dev]"` 正式 editable install。
+- 在激活的 Python 3.12.13 环境中运行 `python -m pytest pc/tests/test_smoke.py -q`，结果为 `1 passed`。
 
 ## 风险与限制
 
-- 当前工作机仅发现 Python 3.10 与 Python 3.11；项目规定 Python 3.12，尚不能在该机按正式依赖约束创建完整开发环境。
 - 本任务未连接 PLC，未执行任何硬件读写或运动操作。
-- 控制台入口指向后续任务将提供的 `turntable_control.main:main`。
+- 当前控制台入口只输出开发阶段安全提示，不会连接或写入 PLC。
 
 ## 下一步
 
-准备 Python 3.12 环境后运行 `scripts/setup.ps1`，并继续实现寄存器协议和纯运动规则。
+继续实现寄存器协议和纯运动规则。
 
 ## 额度检查
 
