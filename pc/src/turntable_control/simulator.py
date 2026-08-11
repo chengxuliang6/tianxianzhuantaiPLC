@@ -87,7 +87,7 @@ class TurntableSimulator:
             raise MotionRejected("simulator is already running")
         if self._buffer_pending:
             raise MotionRejected("acknowledge buffered events before starting a new run")
-        if mode not in (Mode.MANUAL, Mode.AUTO) or direction not in (Direction.CW, Direction.CCW):
+        if type(mode) is not Mode or type(direction) is not Direction:
             raise MotionRejected("invalid mode or direction")
         if speed_deg_s not in SPEEDS_DEG_S:
             raise MotionRejected("unsupported speed")
@@ -122,10 +122,9 @@ class TurntableSimulator:
         for _ in range(delta_ms):
             if not self._is_active:
                 break
-            if not heartbeat_updated:
-                self._heartbeat_age_ms += 1
-                if self._heartbeat_age_ms > self._heartbeat_timeout_ms:
-                    self._begin_stop(RunStatus.COMMUNICATION_ABORTED)
+            self._heartbeat_age_ms += 1
+            if self._heartbeat_age_ms > self._heartbeat_timeout_ms:
+                self._begin_stop(RunStatus.COMMUNICATION_ABORTED)
             elapsed_before = self.elapsed_ms
             previous_position = self.position_deg
             self._advance_one_millisecond()
@@ -165,6 +164,8 @@ class TurntableSimulator:
         return self.run_state in (RunState.MANUAL_RUNNING, RunState.AUTO_RUNNING, RunState.STOPPING)
 
     def _begin_stop(self, status: RunStatus) -> None:
+        if self.run_state is RunState.STOPPING:
+            return
         self.run_state = RunState.STOPPING
         self._stop_status = status
         self.run_status = status

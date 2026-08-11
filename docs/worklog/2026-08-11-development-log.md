@@ -85,3 +85,17 @@
 ### Constraints
 
 - No PLC, network, or hardware access was performed.
+
+## Task 3 review follow-up: heartbeat and stop-state hardening
+
+### Root cause and test-first evidence
+
+- Added regressions before changing the simulator. The focused command initially reported `9 failed, 20 passed`: heartbeat age did not advance after a `heartbeat_updated=True` observation, a later stop overwrote a communication abort, and raw integer/boolean enum equivalents crossed the public boundary.
+- Defined each heartbeat observation at the start of `tick()`: age resets once, then increments for every simulated millisecond; only an age strictly above 1000 ms starts the communication stop.
+- Made the first controlled-stop reason immutable while `STOPPING` and required exact `Mode` and `Direction` enum instances at `start()`.
+
+### Verification
+
+- Focused Task 3 tests: `29 passed in 2.07s`.
+- Full PC tests: `78 passed in 2.10s`.
+- No PLC, network, or hardware access was performed.

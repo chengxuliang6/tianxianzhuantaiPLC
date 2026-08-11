@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from enum import IntEnum
+
 import pytest
 
 from turntable_control.domain import Direction, Mode, MotionRejected, RunState, RunStatus
@@ -86,7 +88,8 @@ def test_request_stop_brakes_motion_without_exceeding_braking_bound(
 ) -> None:
     sim = TurntableSimulator()
     sim.start(mode, Direction.CW, speed_deg_s=10.0)
-    sim.tick(2_000, heartbeat_updated=True)
+    for _ in range(200):
+        sim.tick(10, heartbeat_updated=True)
     velocity_at_request = sim.velocity_deg_s
     position_at_request = sim.position_deg
     sim.request_stop()
@@ -115,6 +118,55 @@ def test_exactly_one_second_without_heartbeat_does_not_abort_but_1001_ms_does() 
     sim.tick(1_000, heartbeat_updated=False)
     assert sim.run_status is RunStatus.RUNNING
     sim.tick(1, heartbeat_updated=False)
+    assert sim.run_status is RunStatus.COMMUNICATION_ABORTED
+
+
+def test_heartbeat_update_is_observed_at_tick_start_and_then_ages() -> None:
+    one_second = TurntableSimulator()
+    one_second.start(Mode.AUTO, Direction.CW, speed_deg_s=1.0)
+    one_second.tick(1_000, heartbeat_updated=True)
+    assert one_second.run_status is RunStatus.RUNNING
+
+    overdue = TurntableSimulator()
+    overdue.start(Mode.AUTO, Direction.CW, speed_deg_s=1.0)
+    overdue.tick(1_001, heartbeat_updated=True)
+    assert overdue.run_status is RunStatus.COMMUNICATION_ABORTED
+
+
+def test_heartbeat_timeout_is_invariant_to_mixed_tick_sizes_after_an_update() -> None:
+    single_tick = TurntableSimulator()
+    single_tick.start(Mode.AUTO, Direction.CW, speed_deg_s=1.0)
+    single_tick.tick(1_001, heartbeat_updated=True)
+
+    mixed_ticks = TurntableSimulator()
+    mixed_ticks.start(Mode.AUTO, Direction.CW, speed_deg_s=1.0)
+    mixed_ticks.tick(400, heartbeat_updated=True)
+    mixed_ticks.tick(601, heartbeat_updated=False)
+
+    assert single_tick.run_status is RunStatus.COMMUNICATION_ABORTED
+    assert mixed_ticks.run_status is RunStatus.COMMUNICATION_ABORTED
+    assert mixed_ticks.position_deg == pytest.approx(single_tick.position_deg)
+    assert mixed_ticks.velocity_deg_s == pytest.approx(single_tick.velocity_deg_s)
+
+
+def test_repeated_stop_requests_do_not_replace_the_first_stop_reason() -> None:
+    sim = TurntableSimulator()
+    sim.start(Mode.AUTO, Direction.CW, speed_deg_s=10.0)
+    sim.tick(1_000, heartbeat_updated=True)
+    sim.request_stop()
+    assert sim.run_status is RunStatus.AUTOMATIC_ABORTED
+    sim.request_stop()
+    assert sim.run_status is RunStatus.AUTOMATIC_ABORTED
+
+
+def test_request_stop_cannot_replace_a_communication_abort_reason() -> None:
+    sim = TurntableSimulator()
+    sim.start(Mode.AUTO, Direction.CW, speed_deg_s=10.0)
+    sim.tick(1_001, heartbeat_updated=False)
+    assert sim.run_status is RunStatus.COMMUNICATION_ABORTED
+    sim.request_stop()
+    assert sim.run_status is RunStatus.COMMUNICATION_ABORTED
+    sim.run_until_stopped(step_ms=10)
     assert sim.run_status is RunStatus.COMMUNICATION_ABORTED
 
 
@@ -155,3 +207,25 @@ def test_invalid_commands_and_ticks_are_rejected_and_repeated_runs_are_determini
     assert first.position_deg == second.position_deg
     assert first.elapsed_ms == second.elapsed_ms
     assert first.events == second.events
+
+
+class _OtherMode(IntEnum):
+    AUTO = 1
+
+
+@pytest.mark.parametrize(
+    ("mode", "direction"),
+    [
+        (1, Direction.CW),
+        (True, Direction.CW),
+        (_OtherMode.AUTO, Direction.CW),
+        (Mode.AUTO, 1),
+        (Mode.AUTO, True),
+        (Mode.AUTO, _OtherMode.AUTO),
+    ],
+)
+def test_start_requires_exact_mode_and_direction_enum_instances(
+    mode: object, direction: object
+) -> None:
+    with pytest.raises(MotionRejected, match="invalid mode or direction"):
+        TurntableSimulator().start(mode, direction, speed_deg_s=1.0)  # type: ignore[arg-type]
