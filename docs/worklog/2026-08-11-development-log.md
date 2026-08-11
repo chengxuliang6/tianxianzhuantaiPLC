@@ -177,3 +177,16 @@
 
 - Reviewer regression tests first failed against the prior implementation: concurrent CSV saves had no exclusive claim, arbitrary string metadata was accepted, and midpoint/rounding lost precision at values larger than `2**53`.
 - Added two interleaved thread tests, final-plus-stale-lock behavior, strict metadata validation, and exact large-value rounding coverage. No real network, PLC, hardware, buffer acknowledgement, or client communication was accessed or performed.
+
+## Task 6 review remediation: lock cleanup failure reporting
+
+### Completed work
+
+- Lock close/remove failures no longer leak native filesystem exceptions or replace the CSV save error that caused cleanup to run.
+- If `os.replace` has already safely published the final CSV, a cleanup failure now emits a `RuntimeWarning` with manual lock-inspection/removal guidance and still returns the final path for the later controller.
+- If publication failed first, cleanup failure emits a warning while preserving the original `CsvSaveError`; the temporary CSV and lock remain as diagnostic evidence.
+
+### Test-first evidence and constraints
+
+- Added close/unlink failure regressions for both pre-publication and post-publication paths. They first demonstrated that direct `finally` cleanup raised raw `OSError` and masked the intended outcome.
+- No real network, PLC, hardware, buffer acknowledgement, or client communication was accessed or performed.

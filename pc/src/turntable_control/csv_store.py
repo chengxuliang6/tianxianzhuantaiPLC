@@ -10,6 +10,7 @@ import csv
 import math
 import os
 import re
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -99,6 +100,8 @@ class CsvStore:
             raise CsvSaveError(f"invalid run export: {error}") from error
 
         lock_fd: int | None = None
+        published = False
+        failure: CsvSaveError | None = None
         try:
             root.mkdir(parents=True, exist_ok=True)
             try:
@@ -116,20 +119,34 @@ class CsvStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_path, final_path)
-            return final_path
-        except CsvSaveError:
-            raise
+            published = True
+        except CsvSaveError as error:
+            failure = error
         except Exception as error:
-            raise CsvSaveError(f"failed to save {metadata.test_id!r}: {error}") from error
+            failure = CsvSaveError(f"failed to save {metadata.test_id!r}: {error}")
         finally:
             if lock_fd is not None:
-                try:
-                    os.close(lock_fd)
-                finally:
-                    try:
-                        os.unlink(lock_path)
-                    except FileNotFoundError:
-                        pass
+                cleanup_error = _release_lock(lock_fd, lock_path)
+                if cleanup_error is not None:
+                    if published:
+                        warnings.warn(
+                            "final CSV was safely published, but its lock needs manual inspection/removal: "
+                            f"{cleanup_error}",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                    else:
+                        warnings.warn(
+                            "CSV lock cleanup failed; original CSV save failure is retained and the lock needs "
+                            f"manual inspection/removal: {cleanup_error}",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+        if failure is not None:
+            raise failure
+        if published:
+            return final_path
+        raise CsvSaveError("CSV save did not publish a final file")
 
 
 def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[RunMetadata, list[dict[str, str]]]:
@@ -211,6 +228,21 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
 def _validate_u32(value: object, field: str) -> None:
     if type(value) is not int or not 0 <= value <= _U32_MAX:
         raise CsvSaveError(f"{field} must be a raw unsigned 32-bit integer")
+
+
+def _release_lock(lock_fd: int, lock_path: Path) -> str | None:
+    """Release one owned lock, retaining it whenever cleanup cannot be completed."""
+    try:
+        os.close(lock_fd)
+    except OSError as error:
+        return f"could not close lock ({error})"
+    try:
+        os.unlink(lock_path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return f"could not remove lock ({error})"
+    return None
 
 
 def _format_decimal(value: object) -> str:

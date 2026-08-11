@@ -206,6 +206,71 @@ def test_second_thread_cannot_publish_while_first_holds_lock_through_replace(
     assert not (tmp_path / "test-001.csv.lock").exists()
 
 
+@pytest.mark.parametrize("cleanup", ["close", "unlink"])
+def test_lock_cleanup_failure_after_publish_warns_but_returns_final(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup: str
+) -> None:
+    lock = tmp_path / "test-001.csv.lock"
+    if cleanup == "close":
+        original_close = os.close
+
+        def failing_close(descriptor: int) -> None:
+            original_close(descriptor)
+            raise OSError("close failed")
+
+        monkeypatch.setattr(os, "close", failing_close)
+    else:
+        original_unlink = os.unlink
+
+        def failing_unlink(path: str | Path) -> None:
+            if Path(path) == lock:
+                raise OSError("unlink failed")
+            original_unlink(path)
+
+        monkeypatch.setattr(os, "unlink", failing_unlink)
+
+    with pytest.warns(RuntimeWarning, match="final CSV was safely published"):
+        output = CsvStore(tmp_path).save_run(sample_run(), synced_clock())
+
+    assert output == tmp_path / "test-001.csv"
+    assert output.exists()
+    assert not (tmp_path / "test-001.csv.tmp").exists()
+    assert lock.exists()
+
+
+@pytest.mark.parametrize("cleanup", ["close", "unlink"])
+def test_lock_cleanup_failure_before_publish_warns_and_retains_csv_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup: str
+) -> None:
+    lock = tmp_path / "test-001.csv.lock"
+    monkeypatch.setattr(os, "fsync", Mock(side_effect=OSError("disk full")))
+    if cleanup == "close":
+        original_close = os.close
+
+        def failing_close(descriptor: int) -> None:
+            original_close(descriptor)
+            raise OSError("close failed")
+
+        monkeypatch.setattr(os, "close", failing_close)
+    else:
+        original_unlink = os.unlink
+
+        def failing_unlink(path: str | Path) -> None:
+            if Path(path) == lock:
+                raise OSError("unlink failed")
+            original_unlink(path)
+
+        monkeypatch.setattr(os, "unlink", failing_unlink)
+
+    with pytest.warns(RuntimeWarning, match="original CSV save failure is retained"):
+        with pytest.raises(CsvSaveError, match="disk full"):
+            CsvStore(tmp_path).save_run(sample_run(), synced_clock())
+
+    assert not (tmp_path / "test-001.csv").exists()
+    assert (tmp_path / "test-001.csv.tmp").exists()
+    assert lock.exists()
+
+
 @pytest.mark.parametrize("operation", ["fsync", "replace"])
 def test_save_run_failure_preserves_temporary_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
     monkeypatch.setattr(os, operation, Mock(side_effect=OSError("disk full")))
