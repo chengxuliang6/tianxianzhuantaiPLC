@@ -143,6 +143,9 @@ def test_status_decodes_signed_values_raw_u32_and_unknown_enums(fake_transport: 
     fake_transport.memory[Register.TARGET_POSITION_HI : Register.TARGET_POSITION_LO + 1] = list(encode_i32(12_345))
     fake_transport.memory[Register.ACTUAL_VELOCITY_HI : Register.ACTUAL_VELOCITY_LO + 1] = list(encode_i32(-1_000))
     fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(encode_u32(0xFFFF_FFFF))
+    fake_transport.memory[Register.RUN_START_TICK_MS_HI : Register.RUN_START_TICK_MS_LO + 1] = list(
+        encode_u32(0xFEDC_BA98)
+    )
 
     status = client.read_status()
 
@@ -152,6 +155,9 @@ def test_status_decodes_signed_values_raw_u32_and_unknown_enums(fake_transport: 
     assert status.target_position_deg == 12.345
     assert status.actual_velocity_deg_s == -1.0
     assert status.plc_tick_ms == 0xFFFF_FFFF
+    assert status.run_start_plc_ms == 0xFEDC_BA98
+    status_reads = [call for call in fake_transport.read_calls if call["address"] == Register.RUN_STATE]
+    assert status_reads[-1]["count"] == 21
 
 
 def test_read_events_chunks_360_records_without_reading_past_fixed_buffer(fake_transport: FakeTransport) -> None:

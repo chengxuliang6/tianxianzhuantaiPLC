@@ -64,6 +64,8 @@ command. Initial values are bit patterns where `16#` notation is shown.
 | D1116 | iD1116EventCount | INT | NR | 0 | buffered event count, maximum 360 |
 | D1117 | iD1117Generation | INT | NR | 0 | event-buffer generation |
 | D1118 | iD1118RunStatus | INT | NR | 0 | final/current run status |
+| D1119 | iD1119RunStartTickHi | INT | NR | 0 | RUN_START_TICK_MS raw u32 high word |
+| D1120 | iD1120RunStartTickLo | INT | NR | 0 | RUN_START_TICK_MS raw u32 low word |
 | D1200 | iD1200ProtocolVersion | INT | NR | 1 | protocol version 1, PLC writes |
 | D1201 | iD1201WordOrderHi | INT | NR | 16#1234 | word-order probe high word |
 | D1202 | iD1202WordOrderLo | INT | NR | 16#5678 | word-order probe low word |
@@ -192,8 +194,9 @@ rejected, because phase 1 has no verified compensation algorithm.
   during commissioning and treat a scan overrun as a commissioning failure.
 - Keep task/FB nesting shallow: one 1 ms `PRG_MAIN` task with two FB calls and
   two codec FCs. Check scan-overrun/jitter with AutoShop commissioning tools.
-- The unsigned 32-bit tick wraps after about 49.7 days. D1204:D1205 and event
-  elapsed words are raw high-word-first u32 bit patterns; the PC must use
+- The unsigned 32-bit tick wraps after about 49.7 days. D1119:D1120
+  `RUN_START_TICK_MS`, D1204:D1205, and event elapsed words are raw
+  high-word-first u32 bit patterns; the PC must use
   `decode_u32`, not `decode_i32`, so values past 24.85 days do not become
   negative. Unsigned subtraction preserves elapsed time across one wrap; it is
   non-retained and is a duration, not an absolute clock.

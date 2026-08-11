@@ -130,12 +130,34 @@ def test_constants_cover_register_contract_motion_contract_and_event_extent() ->
     constants = source("Turntable_Constants.st")
     for register in range(1000, 1020):
         assert f"D{register}" in constants
-    for register in range(1100, 1119):
+    for register in range(1100, 1121):
         assert f"D{register}" in constants
     for register in range(1200, 1207):
         assert f"D{register}" in constants
     for token in ("16#1234", "16#5678", "360", "6", "D4159", "50000", "5000", "10000", "-360.0", "360.0", "1.0", "2.0", "4.0", "5.0", "10.0", "DIRECTION_CW", "DIRECTION_CCW"):
         assert token in constants
+
+
+def test_plc_publishes_latched_run_start_tick_as_high_word_first_u32() -> None:
+    constants = source("Turntable_Constants.st")
+    main = source("PRG_MAIN.st")
+    readme = (PLC / "README.md").read_text(encoding="utf-8")
+
+    for token in (
+        "D1119_RUN_START_TICK_HI",
+        "D1120_RUN_START_TICK_LO",
+        "iD1119RunStartTickHi",
+        "iD1120RunStartTickLo",
+    ):
+        assert token in constants
+    assert re.search(
+        r"FC_SplitU32\(udiValue\s*:=\s*fbControl\.udiRunStartTickMs,\s*"
+        r"iHighWord\s*=>\s*iD1119RunStartTickHi,\s*"
+        r"iLowWord\s*=>\s*iD1120RunStartTickLo\)",
+        main,
+    )
+    assert "D1119:D1120" in readme
+    assert "RUN_START_TICK_MS" in readme
 
 
 def test_degree_logger_is_bounded_writes_six_words_and_preserves_unacked_buffer() -> None:

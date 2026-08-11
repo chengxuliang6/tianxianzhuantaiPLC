@@ -43,6 +43,7 @@ class StatusSnapshot:
     event_count: int
     event_generation: int
     run_status: RunStatus | int
+    run_start_plc_ms: int
     protocol_version: int
     word_order_probe: int
     time_sync_request_seq: int
@@ -202,7 +203,7 @@ class TurntableModbusClient:
     def read_status(self) -> StatusSnapshot:
         with self._lock:
             self._require_verified()
-            status = self._read_words(Register.RUN_STATE, 19, "status")
+            status = self._read_words(Register.RUN_STATE, 21, "status")
             protocol = self._read_words(Register.PROTOCOL_VERSION, 7, "protocol status")
             if protocol[0] != 1:
                 self._invalidate_session()
@@ -227,6 +228,7 @@ class TurntableModbusClient:
                 event_count=status[16],
                 event_generation=status[17],
                 run_status=_enum_or_raw(RunStatus, status[18]),
+                run_start_plc_ms=_decode_u32(status[19:21], "run-start PLC tick"),
                 protocol_version=protocol[0],
                 word_order_probe=_decode_i32(protocol[1:3], "word-order probe"),
                 time_sync_request_seq=protocol[3],

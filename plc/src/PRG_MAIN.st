@@ -156,5 +156,6 @@ diVelocityMdegS := REAL_TO_DINT(rActualVelocity * 1000.0);
 FC_SplitI32(diValue := diPositionMdeg, iHighWord => iD1103PositionHi, iLowWord => iD1104PositionLo);
 FC_SplitI32(diValue := diTargetMdeg, iHighWord => iD1105TargetHi, iLowWord => iD1106TargetLo);
 FC_SplitI32(diValue := diVelocityMdegS, iHighWord => iD1107VelocityHi, iLowWord => iD1108VelocityLo);
+FC_SplitU32(udiValue := fbControl.udiRunStartTickMs, iHighWord => iD1119RunStartTickHi, iLowWord => iD1120RunStartTickLo);
 FC_SplitU32(udiValue := udiPlcTickMs, iHighWord => iD1204TickHi, iLowWord => iD1205TickLo);
 END_PROGRAM

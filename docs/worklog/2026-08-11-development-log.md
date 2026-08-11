@@ -190,3 +190,20 @@
 
 - Added close/unlink failure regressions for both pre-publication and post-publication paths. They first demonstrated that direct `finally` cleanup raised raw `OSError` and masked the intended outcome.
 - No real network, PLC, hardware, buffer acknowledgement, or client communication was accessed or performed.
+
+## Task 7: Safe controller sessions, heartbeat, and exact run-start tick
+
+### Completed work
+
+- Added the immutable, Qt-independent `TurntableController` snapshot/callback API and a bounded command queue whose public methods perform no Modbus or CSV I/O.
+- Serialized all client and CSV operations through one deterministic pump/background worker; STOP has a dedicated priority slot that removes pending START, while disconnects and communication failures clear unsafe queued commands without replay.
+- Added fresh status interlocks immediately before START, fixed speed-to-index mapping, 100 ms polling, 250 ms raw-u16 heartbeat scheduling, matching-sequence clock samples, and exact PLC-published run-start tick capture.
+- Added terminal event handling in the strict order read prefix → durable CSV save → buffer acknowledgement. Failed reads/saves retain the buffer for explicit retry; an uncertain ACK retains the durable path and reuses it after reconnect without another save or motion retry.
+- Extended protocol version 1 with high-word-first raw-u32 `D1119:D1120 RUN_START_TICK_MS`, synchronizing the Python register contract, Modbus status decoder, PLC constants/global table, `PRG_MAIN` publication, and AutoShop reference documentation.
+
+### Test-first evidence and constraints
+
+- Protocol tests first produced five expected failures for the absent D1119:D1120 addresses, status decode, and PLC publication path; the focused protocol suite passed after the minimal synchronized change.
+- Controller tests first failed at collection with `ModuleNotFoundError: turntable_control.controller`. Subsequent RED groups demonstrated missing worker-side interlock/error handling, scheduling/sync, terminal download/ACK recovery, callback reporting, pump shutdown, stale sync invalidation, and generation-wrap handling before each minimal implementation.
+- All controller tests use injected fake clients/stores and temporary paths. No real network, PLC, AutoShop, servo, or hardware operation was accessed or performed.
+- AutoShop compilation and actual PLC timing/word order remain controlled on-site verification work; the software stop and communication heartbeat are not a physical emergency stop.

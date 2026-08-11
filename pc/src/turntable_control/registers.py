@@ -59,6 +59,8 @@ class Register(IntEnum):
     EVENT_COUNT = 1116
     EVENT_GENERATION = 1117
     RUN_STATUS = 1118
+    RUN_START_TICK_MS_HI = 1119
+    RUN_START_TICK_MS_LO = 1120
 
     # D1200-D1299 time synchronization and protocol probe block
     PROTOCOL_VERSION = 1200

@@ -121,6 +121,8 @@ def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() ->
         Register.EVENT_COUNT,
         Register.EVENT_GENERATION,
         Register.RUN_STATUS,
+        Register.RUN_START_TICK_MS_HI,
+        Register.RUN_START_TICK_MS_LO,
     ]
     protocol_addresses = [
         Register.PROTOCOL_VERSION,
@@ -142,3 +144,9 @@ def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() ->
     assert registers.EVENT_RECORD_WORDS == 6
     assert registers.EVENT_RECORD_COUNT == 360
     assert Register.event_last_address() == 4159
+
+
+def test_run_start_tick_occupies_the_next_two_status_words_without_overlap() -> None:
+    assert Register.RUN_START_TICK_MS_HI == 1119
+    assert Register.RUN_START_TICK_MS_LO == 1120
+    assert Register.RUN_START_TICK_MS_LO < Register.PROTOCOL_VERSION
