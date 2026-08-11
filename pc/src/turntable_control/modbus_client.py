@@ -141,12 +141,15 @@ class TurntableModbusClient:
     def connect(self) -> None:
         """Open a session and perform the required read-only protocol probe."""
         with self._lock:
+            self._invalidate_session()
             self._verified = False
             try:
                 connected = self._transport.connect()
             except Exception as error:
+                self._invalidate_session(force_close=True)
                 raise CommunicationError(f"connect: {error}") from error
             if connected is not True:
+                self._invalidate_session(force_close=True)
                 raise CommunicationError("connect: transport returned false")
             self._transport_open = True
             try:
@@ -190,16 +193,23 @@ class TurntableModbusClient:
                 self._transport_open = False
 
     def reconnect(self) -> None:
-        """Refresh read-only session state without replaying pending commands."""
+        """Refresh command, acknowledgement, and status state without replaying commands."""
         with self._lock:
             self.close()
             self.connect()
+            self.read_status()
 
     def read_status(self) -> StatusSnapshot:
         with self._lock:
             self._require_verified()
             status = self._read_words(Register.RUN_STATE, 19, "status")
             protocol = self._read_words(Register.PROTOCOL_VERSION, 7, "protocol status")
+            if protocol[0] != 1:
+                self._invalidate_session()
+                raise ProtocolMismatch(f"protocol version at D1200 is {protocol[0]}, expected 1")
+            if protocol[1:3] != [0x1234, 0x5678]:
+                self._invalidate_session()
+                raise ProtocolMismatch("word-order probe at D1201:D1202 is not 0x1234,0x5678")
             return StatusSnapshot(
                 run_state=_enum_or_raw(RunState, status[0]),
                 status_flags=status[1],
@@ -225,9 +235,9 @@ class TurntableModbusClient:
             )
 
     def read_events(self, count: int) -> list[EventRecord]:
-        if type(count) is not int or not 0 <= count <= EVENT_RECORD_COUNT:
-            raise ValueError("count must be an integer in 0..360")
         with self._lock:
+            if type(count) is not int or not 0 <= count <= EVENT_RECORD_COUNT:
+                raise ValueError("count must be an integer in 0..360")
             self._require_verified()
             if count == 0:
                 return []
@@ -242,16 +252,23 @@ class TurntableModbusClient:
                 remaining -= chunk_size
             if address - 1 > Register.event_last_address():
                 raise CommunicationError("event buffer request crosses D4159")
-            return [self._decode_event(words[index : index + EVENT_RECORD_WORDS]) for index in range(0, total_words, 6)]
+            try:
+                return [
+                    self._decode_event(words[index : index + EVENT_RECORD_WORDS], index // EVENT_RECORD_WORDS)
+                    for index in range(0, total_words, EVENT_RECORD_WORDS)
+                ]
+            except CommunicationError:
+                self._invalidate_session()
+                raise
 
     def send_start(self, mode: Mode, direction: Direction, speed_index: int) -> int:
-        if type(mode) is not Mode:
-            raise ValueError("mode must be a Mode enum member")
-        if type(direction) is not Direction:
-            raise ValueError("direction must be a Direction enum member")
-        if type(speed_index) is not int or not 1 <= speed_index <= 5:
-            raise ValueError("speed_index must be an integer in 1..5")
         with self._lock:
+            if type(mode) is not Mode:
+                raise ValueError("mode must be a Mode enum member")
+            if type(direction) is not Direction:
+                raise ValueError("direction must be a Direction enum member")
+            if type(speed_index) is not int or not 1 <= speed_index <= 5:
+                raise ValueError("speed_index must be an integer in 1..5")
             self._require_verified()
             if self.read_status().run_status is RunStatus.RUNNING:
                 raise CommunicationError("cannot write start parameters while run status is running")
@@ -284,9 +301,9 @@ class TurntableModbusClient:
             return self._increment_sequence(Register.POWER_SEQ, "power sequence")
 
     def write_heartbeat(self, value: int) -> None:
-        if type(value) is not int or not 0 <= value <= 0xFFFF:
-            raise ValueError("heartbeat must be an unsigned 16-bit integer")
         with self._lock:
+            if type(value) is not int or not 0 <= value <= 0xFFFF:
+                raise ValueError("heartbeat must be an unsigned 16-bit integer")
             self._require_verified()
             self._write_register(Register.HEARTBEAT, value, "heartbeat")
 
@@ -306,10 +323,10 @@ class TurntableModbusClient:
         if not self._verified:
             raise ProtocolMismatch("writes and reads are disabled until protocol verification succeeds")
 
-    def _invalidate_session(self) -> None:
+    def _invalidate_session(self, *, force_close: bool = False) -> None:
         self._verified = False
         self._sequences.clear()
-        if self._transport_open:
+        if self._transport_open or force_close:
             try:
                 self._transport.close()
             except Exception:
@@ -325,13 +342,21 @@ class TurntableModbusClient:
                 raise CommunicationError(f"{operation} at D{int(address)}: Modbus error response")
             registers = response.registers
         except CommunicationError:
+            if self._verified:
+                self._invalidate_session()
             raise
         except Exception as error:
+            if self._verified:
+                self._invalidate_session()
             raise CommunicationError(f"{operation} at D{int(address)}: {error}") from error
         if not isinstance(registers, Sequence) or len(registers) != count:
             actual = len(registers) if isinstance(registers, Sequence) else "missing"
+            if self._verified:
+                self._invalidate_session()
             raise CommunicationError(f"{operation} at D{int(address)}: expected {count} registers, got {actual}")
         if any(type(word) is not int or not 0 <= word <= 0xFFFF for word in registers):
+            if self._verified:
+                self._invalidate_session()
             raise CommunicationError(f"{operation} at D{int(address)}: malformed register data")
         return list(registers)
 
@@ -341,8 +366,10 @@ class TurntableModbusClient:
             if response is None or response.isError():
                 raise CommunicationError(f"{operation} at D{int(address)}: Modbus error response")
         except CommunicationError:
+            self._invalidate_session()
             raise
         except Exception as error:
+            self._invalidate_session()
             raise CommunicationError(f"{operation} at D{int(address)}: {error}") from error
 
     def _write_registers(self, address: Register, values: list[int], operation: str) -> None:
@@ -351,8 +378,10 @@ class TurntableModbusClient:
             if response is None or response.isError():
                 raise CommunicationError(f"{operation} at D{int(address)}: Modbus error response")
         except CommunicationError:
+            self._invalidate_session()
             raise
         except Exception as error:
+            self._invalidate_session()
             raise CommunicationError(f"{operation} at D{int(address)}: {error}") from error
 
     def _increment_sequence(self, address: Register, operation: str) -> int:
@@ -362,12 +391,12 @@ class TurntableModbusClient:
         return value
 
     @staticmethod
-    def _decode_event(words: Sequence[int]) -> EventRecord:
+    def _decode_event(words: Sequence[int], record_index: int) -> EventRecord:
         if len(words) != EVENT_RECORD_WORDS:
             raise CommunicationError("event record has an invalid word count")
         sequence, travel_angle = words[:2]
-        if not 0 <= sequence <= 0xFFFF:
-            raise CommunicationError("event sequence is outside u16 range")
+        if sequence != record_index + 1:
+            raise CommunicationError("event sequence does not match the requested record prefix")
         if not 1 <= travel_angle <= EVENT_RECORD_COUNT:
             raise CommunicationError("event travel angle is outside 1..360")
         return EventRecord(

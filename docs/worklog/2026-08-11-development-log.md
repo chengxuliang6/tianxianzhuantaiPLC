@@ -139,3 +139,15 @@
 
 - The new focused test suite was run before the module existed and produced the expected 16 failures, all due to `ModuleNotFoundError: turntable_control.modbus_client`.
 - After implementation, the focused suite and complete PC suite pass using only the in-memory fake transport. No real network, PLC, servo, or other hardware access was performed.
+
+## Task 5 review remediation: invalidate uncertain Modbus sessions
+
+### Completed work
+
+- Any write error or exception now invalidates and closes the session before the communication error is returned. This prevents stale command words from being reused after an ambiguous PLC-side write.
+- Read I/O failures, malformed/short reads, and protocol-probe drift during status polling now also invalidate the verified session; a reconnect must read fresh command/ack state before further commands.
+- Event records now require the exact sequence prefix `record_index + 1`. Fake-transport coverage includes unexecuted write exceptions, write-then-error ambiguity, parameter interruption before START, protocol drift, and reconnect behavior.
+
+### Constraint
+
+- An ambiguous START response must be reconciled by reconnecting and checking PLC state. It must never be blindly retried. No real network, PLC, servo, or hardware access was performed.

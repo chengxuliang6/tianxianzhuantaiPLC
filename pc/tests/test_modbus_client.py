@@ -35,6 +35,11 @@ class FakeTransport:
         self.read_calls: list[dict[str, int]] = []
         self.write_calls: list[dict[str, object]] = []
         self.close_calls = 0
+        self.single_write_error_on_address: int | None = None
+        self.single_write_exception_on_address: int | None = None
+        self.multiple_write_error_on_call: int | None = None
+        self.multiple_write_exception_on_call: int | None = None
+        self._multiple_write_calls = 0
 
     def connect(self) -> bool:
         if self.connect_error:
@@ -55,13 +60,18 @@ class FakeTransport:
 
     def write_register(self, *, address: int, value: int, device_id: int) -> FakeResponse:
         self.write_calls.append({"kind": "single", "address": address, "value": value, "device_id": device_id})
+        if address == self.single_write_exception_on_address:
+            raise RuntimeError("single write unavailable")
         self.memory[address] = value
-        return FakeResponse([])
+        return FakeResponse([], address == self.single_write_error_on_address)
 
     def write_registers(self, *, address: int, values: list[int], device_id: int) -> FakeResponse:
         self.write_calls.append({"kind": "multiple", "address": address, "values": values, "device_id": device_id})
+        self._multiple_write_calls += 1
+        if self._multiple_write_calls == self.multiple_write_exception_on_call:
+            raise RuntimeError("multiple write unavailable")
         self.memory[address : address + len(values)] = values
-        return FakeResponse([])
+        return FakeResponse([], self._multiple_write_calls == self.multiple_write_error_on_call)
 
 
 @pytest.fixture
@@ -149,7 +159,7 @@ def test_read_events_chunks_360_records_without_reading_past_fixed_buffer(fake_t
     connect(client)
     for index in range(360):
         base = Register.EVENT_BUFFER_BASE + index * 6
-        fake_transport.memory[base : base + 6] = [index, index + 1, *encode_i32(-index), *encode_u32(index)]
+        fake_transport.memory[base : base + 6] = [index + 1, index + 1, *encode_i32(-index), *encode_u32(index)]
 
     events = client.read_events(360)
     event_reads = [call for call in fake_transport.read_calls if call["address"] >= Register.EVENT_BUFFER_BASE]
@@ -187,9 +197,11 @@ def test_commands_increment_wrap_and_reconnect_does_not_replay(fake_transport: F
     assert client.send_start(Mode.MANUAL, Direction.CW, 1) == 0
     assert client.send_stop() == 0
     writes_before_reconnect = list(fake_transport.write_calls)
+    reads_before_reconnect = len(fake_transport.read_calls)
     client.reconnect()
 
     assert fake_transport.write_calls == writes_before_reconnect
+    assert any(call["address"] == Register.RUN_STATE for call in fake_transport.read_calls[reads_before_reconnect:])
 
 
 def test_start_writes_fixed_parameters_then_settings_then_sequence_and_rejects_invalid_input(
@@ -262,4 +274,137 @@ def test_close_is_idempotent_and_sequence_increments_are_thread_safe(fake_transp
     assert sorted(results) == list(range(1, 9))
     client.close()
     client.close()
+    assert fake_transport.close_calls == 1
+
+
+@pytest.mark.parametrize("failure", ["error", "exception"])
+def test_ambiguous_single_write_invalidates_session_and_requires_reconnect(
+    fake_transport: FakeTransport, failure: str
+) -> None:
+    from turntable_control.modbus_client import CommunicationError, ProtocolMismatch
+
+    client = make_client(fake_transport)
+    connect(client)
+    if failure == "error":
+        fake_transport.single_write_error_on_address = Register.STOP_SEQ
+    else:
+        fake_transport.single_write_exception_on_address = Register.STOP_SEQ
+
+    with pytest.raises(CommunicationError, match="stop sequence"):
+        client.send_stop()
+    with pytest.raises(ProtocolMismatch):
+        client.send_stop()
+    assert fake_transport.close_calls == 1
+    writes_before_reconnect = list(fake_transport.write_calls)
+    client.reconnect()
+    assert fake_transport.write_calls == writes_before_reconnect
+
+
+@pytest.mark.parametrize("failure", ["error", "exception"])
+def test_ambiguous_multiple_write_invalidates_session(fake_transport: FakeTransport, failure: str) -> None:
+    from turntable_control.modbus_client import CommunicationError, ProtocolMismatch
+
+    client = make_client(fake_transport)
+    connect(client)
+    if failure == "error":
+        fake_transport.multiple_write_error_on_call = 1
+    else:
+        fake_transport.multiple_write_exception_on_call = 1
+
+    with pytest.raises(CommunicationError, match="start parameter"):
+        client.send_start(Mode.AUTO, Direction.CW, 1)
+    with pytest.raises(ProtocolMismatch):
+        client.send_stop()
+
+
+def test_parameter_write_failure_never_reaches_start_sequence(fake_transport: FakeTransport) -> None:
+    from turntable_control.modbus_client import CommunicationError, ProtocolMismatch
+
+    client = make_client(fake_transport)
+    connect(client)
+    fake_transport.multiple_write_error_on_call = 3
+
+    with pytest.raises(CommunicationError, match="start parameter"):
+        client.send_start(Mode.AUTO, Direction.CW, 1)
+    assert all(call["address"] != Register.START_SEQ for call in fake_transport.write_calls)
+    with pytest.raises(ProtocolMismatch):
+        client.send_stop()
+
+
+def test_start_response_error_is_ambiguous_and_disables_following_commands(fake_transport: FakeTransport) -> None:
+    from turntable_control.modbus_client import CommunicationError, ProtocolMismatch
+
+    client = make_client(fake_transport)
+    connect(client)
+    fake_transport.single_write_error_on_address = Register.START_SEQ
+
+    with pytest.raises(CommunicationError, match="start sequence"):
+        client.send_start(Mode.AUTO, Direction.CW, 1)
+    assert fake_transport.memory[Register.START_SEQ] == 1
+    with pytest.raises(ProtocolMismatch):
+        client.send_stop()
+    writes_before_reconnect = list(fake_transport.write_calls)
+    client.reconnect()
+    assert fake_transport.write_calls == writes_before_reconnect
+
+
+@pytest.mark.parametrize("failure", ["response_error", "exception", "short_read", "malformed"])
+def test_verified_read_failures_invalidate_session(fake_transport: FakeTransport, failure: str) -> None:
+    from turntable_control.modbus_client import CommunicationError, ProtocolMismatch
+
+    client = make_client(fake_transport)
+    connect(client)
+    if failure == "response_error":
+        fake_transport.read_error = True
+    elif failure == "exception":
+        fake_transport.read_exception = RuntimeError("read unavailable")
+    elif failure == "short_read":
+        fake_transport.short_read = True
+    else:
+        fake_transport.memory[Register.RUN_STATE] = -1
+
+    with pytest.raises(CommunicationError):
+        client.read_status()
+    with pytest.raises(ProtocolMismatch):
+        client.send_stop()
+    assert fake_transport.close_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("address", "value"),
+    [(Register.PROTOCOL_VERSION, 2), (Register.WORD_ORDER_PROBE_HI, 0x3412)],
+)
+def test_status_rechecks_protocol_probe_and_invalidates_on_mismatch(
+    fake_transport: FakeTransport, address: Register, value: int
+) -> None:
+    from turntable_control.modbus_client import ProtocolMismatch
+
+    client = make_client(fake_transport)
+    connect(client)
+    fake_transport.memory[address] = value
+
+    with pytest.raises(ProtocolMismatch):
+        client.read_status()
+    with pytest.raises(ProtocolMismatch):
+        client.send_stop()
+    assert fake_transport.close_calls == 1
+
+
+def test_event_sequences_must_match_the_record_prefix(fake_transport: FakeTransport) -> None:
+    from turntable_control.modbus_client import CommunicationError
+
+    client = make_client(fake_transport)
+    connect(client)
+    fake_transport.memory[Register.EVENT_BUFFER_BASE : Register.EVENT_BUFFER_BASE + 12] = [1, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0]
+
+    with pytest.raises(CommunicationError, match="sequence"):
+        client.read_events(2)
+
+
+def test_repeated_connect_closes_the_previous_uncertain_session(fake_transport: FakeTransport) -> None:
+    client = make_client(fake_transport)
+    connect(client)
+
+    client.connect()
+
     assert fake_transport.close_calls == 1
