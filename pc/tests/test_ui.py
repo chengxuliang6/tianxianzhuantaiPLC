@@ -19,6 +19,22 @@ def unused_factory(plc_ip: str) -> object:
     raise AssertionError(f"controller factory must not run during construction: {plc_ip}")
 
 
+def test_simulator_mode_is_visibly_labeled_and_does_not_build_controller(qtbot, tmp_path: Path) -> None:
+    window = MainWindow(
+        unused_factory,
+        tmp_path,
+        initial_ip="本地模拟器",
+        simulator_mode=True,
+    )
+    qtbot.addWidget(window)
+
+    assert "模拟器（无 PLC）" in window.windowTitle()
+    assert window.ip_edit.text() == "本地模拟器"
+    assert window.ip_edit.isReadOnly()
+    assert window.connection_status_label.text() == "模拟器未启动"
+    assert "无 EtherCAT" in window.ethercat_status_label.text()
+
+
 def status_snapshot(**changes: object) -> StatusSnapshot:
     status = StatusSnapshot(
         run_state=RunState.READY,

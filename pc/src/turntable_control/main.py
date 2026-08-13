@@ -21,6 +21,12 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="天线测试转台控制")
     parser.add_argument("--plc-ip", default="", help="仅预填 PLC IPv4 地址，不会自动连接")
     parser.add_argument(
+        "--simulator",
+        action="store_true",
+        help="使用本地模拟器（无 PLC、无网络）",
+    )
+    parser.add_argument("--package-smoke", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
         "--data-dir",
         type=Path,
         default=Path.cwd() / "data",
@@ -33,6 +39,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Create the GUI; all PLC objects remain deferred until Connect is clicked."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     options = _argument_parser().parse_args(arguments)
+    if options.package_smoke and not options.simulator:
+        raise SystemExit("--package-smoke 只能与 --simulator 一起使用")
     data_dir = Path(options.data_dir)
 
     app = QApplication.instance()
@@ -41,7 +49,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     app.setApplicationName("天线测试转台控制")
 
     def controller_factory(plc_ip: str) -> TurntableController:
-        client = TurntableModbusClient(host=plc_ip)
+        if options.simulator:
+            from .simulated_client import SimulatedTurntableClient
+
+            client = SimulatedTurntableClient(
+                monotonic_ms=lambda: time.monotonic_ns() // 1_000_000
+            )
+        else:
+            client = TurntableModbusClient(host=plc_ip)
         return TurntableController(
             client,
             CsvStore(data_dir),
@@ -50,8 +65,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             monotonic_ms=lambda: time.monotonic_ns() // 1_000_000,
         )
 
-    window = MainWindow(controller_factory, data_dir, initial_ip=options.plc_ip)
+    window_options: dict[str, object] = {
+        "initial_ip": "本地模拟器" if options.simulator else options.plc_ip,
+    }
+    if options.simulator:
+        window_options["simulator_mode"] = True
+    window = MainWindow(controller_factory, data_dir, **window_options)
     window.show()
+    if options.package_smoke:
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(250, app.quit)
     return app.exec()
 
 

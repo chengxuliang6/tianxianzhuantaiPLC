@@ -112,10 +112,12 @@ class MainWindow(QMainWindow):
         data_dir: str | Path,
         *,
         initial_ip: str = "",
+        simulator_mode: bool = False,
     ) -> None:
         super().__init__()
         self._controller_factory = controller_factory
         self._data_dir = Path(data_dir)
+        self._simulator_mode = simulator_mode
         self._controller: object | None = None
         self._controller_ip: str | None = None
         self._bridge: ControllerBridge | None = None
@@ -127,6 +129,12 @@ class MainWindow(QMainWindow):
         self.last_snapshot_thread_id: int | None = None
         self._closing = False
         self._build_ui(initial_ip)
+        if simulator_mode:
+            self.setWindowTitle("天线测试转台控制 — 模拟器（无 PLC）")
+            self.ip_edit.setReadOnly(True)
+            self.ip_edit.setToolTip("本地软件模拟，不访问 PLC 或网络")
+            self.connection_status_label.setText("模拟器未启动")
+            self.ethercat_status_label.setText("模拟器：无 EtherCAT / 无真实运动")
         self._software_stop_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
         self._software_stop_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self._software_stop_shortcut.activated.connect(self._request_stop)
@@ -321,11 +329,14 @@ class MainWindow(QMainWindow):
 
     def _request_connect(self) -> None:
         ip_text = self.ip_edit.text().strip()
-        try:
-            plc_ip = str(IPv4Address(ip_text))
-        except AddressValueError:
-            self._show_message("请输入有效的 PLC IPv4 地址")
-            return
+        if self._simulator_mode:
+            plc_ip = "SIMULATOR"
+        else:
+            try:
+                plc_ip = str(IPv4Address(ip_text))
+            except AddressValueError:
+                self._show_message("请输入有效的 PLC IPv4 地址")
+                return
         if self._controller is not None and self._controller_ip != plc_ip:
             if self._snapshot.connected:
                 self._show_message("请先断开当前 PLC，再更换 IPv4 地址")
@@ -369,7 +380,7 @@ class MainWindow(QMainWindow):
             self._show_message(message)
             return
         self._local_command_error = False
-        self._show_message("正在连接 PLC…")
+        self._show_message("正在启动本地模拟器…" if self._simulator_mode else "正在连接 PLC…")
         self._local_command_error = False
         self._refresh_controls()
 

@@ -30,7 +30,9 @@ from .modbus_client import (
 
 STATUS_ZERO_VALID = 0x0001
 STATUS_POWERED = 0x0002
+STATUS_SOFT_LIMIT = 0x0004
 STATUS_BUFFER_READY = 0x0008
+STATUS_HEARTBEAT_OK = 0x0010
 FAULT_START_REJECTED = 10
 _QUEUE_LIMIT = 32
 
@@ -764,8 +766,8 @@ class TurntableController:
         if coherence_error is not None:
             self._download_failed(coherence_error)
             return
-        if not 1 <= status.event_count <= 360:
-            self._download_failed("PLC事件数量必须在1..360")
+        if not 0 <= status.event_count <= 360:
+            self._download_failed("PLC事件数量必须在0..360")
             return
         test_id = self._generation_test_ids.setdefault(
             generation, f"run_{session.requested_epoch_ms}_g{generation}"

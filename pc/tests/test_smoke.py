@@ -8,3 +8,9 @@ def test_console_entry_is_import_safe() -> None:
     from turntable_control.main import main
 
     assert callable(main)
+
+
+def test_pyinstaller_entry_is_import_safe() -> None:
+    import turntable_control_entry
+
+    assert callable(turntable_control_entry.main)

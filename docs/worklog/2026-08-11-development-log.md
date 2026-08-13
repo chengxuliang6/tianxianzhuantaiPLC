@@ -314,3 +314,28 @@
 
 - 未访问网络、PLC、AutoShop、伺服或硬件；queued-callback 验证的是 Qt/Python 本地线程边界，不代表现场 PLC 通信或机械安全验证。
 - 软件停止和通信断开触发的心跳保护仍不是实体急停或安全等级功能。
+
+## Task 9：完整模拟联调、启动脚本与 Windows 打包（2026-08-13）
+
+### 完成项
+
+- 新增线程安全的 `SimulatedTurntableClient`，严格复用正式控制器所依赖的客户端接口、命令/确认序号、运行开始时刻、事件代次、时间同步与终态缓冲合同；读取状态不会伪造心跳。
+- 用正式 `TurntableController`、`ClockSynchronizer` 和 `CsvStore` 完成确定性端到端测试，覆盖 10 种自动速度/方向、正反手动一圈、用户停止、心跳中断、±360°边界、u32 时钟回绕、磁盘失败和未对时重试。
+- 修正模拟器缓冲发布语义：运行中可累积逐度事件，但仅在终态发布 `BUFFER_READY`，避免控制器在第一个跨越角就过早下载。
+- 增加明确的 `--simulator` 模式及“模拟器（无 PLC）”界面标识；模拟器工厂不构造 `TurntableModbusClient`。硬件模式保持默认，并继续延迟到点击连接后才创建客户端。
+- 新增硬件启动、模拟器启动和 Windows 构建脚本，补齐操作员中文 README 与验证报告。
+- Windows 打包首次暴露两个环境问题：包内 `main.py` 直接执行导致相对导入失败；系统 PATH 中 Anaconda OpenSSL 3.0.13 覆盖 Python 3.12 所需的 3.5.7。分别通过专用顶层入口及构建时 Python DLL 路径优先解决。
+- 正式 one-directory GUI 包生成于 `dist\TurntableControl\TurntableControl.exe`；构建后使用仅允许模拟器的自动退出参数验证真实 GUI 启动路径。
+- 独立复审复现了跨过第 1°前立即停止会留下 0 条事件并永久锁住会话；新增回归后，终态仍发布缓冲，CSV 保存一条事件字段全空的运行元数据记录，不伪造角度/时间戳，耐久保存成功后才 ACK 并释放会话。
+
+### 安全与限制
+
+- 全部测试、打包和启动检查均为本地模拟/offscreen；未连接或访问网络、PLC、AutoShop、伺服或转台硬件。
+- 弹出的两次早期打包异常均发生在模块导入阶段，未建立 Modbus 会话；最终包已消除这两个异常。
+- 软件停止、心跳和模拟器都不能替代实体急停、机械限位或现场安全验证。AutoShop 编译、真实字序/方向/轴缩放/扫描抖动及空载运动仍待现场完成。
+
+### 最终证据
+
+- Task 9 聚焦测试：`31 passed`；电脑端全量：`348 passed`；源码编译、PowerShell 解析与 Git 差异检查通过。
+- PyInstaller 6.22.0 干净构建和 `--simulator --package-smoke` 自动退出检查通过；正式 EXE 使用 OpenSSL 3.5.7。
+- `TurntableControl.exe`：2,663,041 字节；SHA-256 `731411974023045BD2B11BB51C095F8B0F8F340C50E987F180C4A5C1FB1574C8`。

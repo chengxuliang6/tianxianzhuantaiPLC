@@ -165,13 +165,39 @@ def _validated_rows(run: RunExport, synchronizer: ClockSynchronizer) -> tuple[Ru
     if type(metadata.saved_at_epoch_ms) is not int:
         raise CsvSaveError("saved_at_epoch_ms must be an integer")
     events = tuple(run.events)
-    if not 1 <= len(events) <= 360:
-        raise CsvSaveError("event count must be in 1..360")
+    if not 0 <= len(events) <= 360:
+        raise CsvSaveError("event count must be in 0..360")
     if metadata.mode is Mode.AUTO and metadata.run_status is RunStatus.COMPLETED and len(events) != 360:
         raise CsvSaveError("AUTO COMPLETED exports must contain exactly 360 events")
     best = synchronizer.best_sample
     if best is None:
         raise CsvSaveError("a clock sample is required before export")
+
+    if not events:
+        return metadata, [
+            {
+                "test_id": metadata.test_id,
+                "mode": metadata.mode.name,
+                "direction": metadata.direction.name,
+                "speed_deg_s": _format_decimal(metadata.speed_deg_s),
+                "total_ratio": _format_decimal(metadata.total_ratio),
+                "acceleration_deg_s2": _format_decimal(metadata.acceleration_deg_s2),
+                "deceleration_deg_s2": _format_decimal(metadata.deceleration_deg_s2),
+                "stop_deceleration_deg_s2": _format_decimal(metadata.stop_deceleration_deg_s2),
+                "run_status": metadata.run_status.name,
+                "run_start_plc_ms": str(metadata.run_start_plc_ms),
+                "saved_at_epoch_ms": str(metadata.saved_at_epoch_ms),
+                "best_rtt_ms": str(best.round_trip_ms),
+                "sequence": "",
+                "travel_angle_deg": "",
+                "actual_position_deg": "",
+                "elapsed_ms": "",
+                "plc_tick_ms": "",
+                "epoch_ms": "",
+                "utc_timestamp": "",
+                "china_timestamp": "",
+            }
+        ]
 
     previous_elapsed = -1
     previous_epoch: int | None = None

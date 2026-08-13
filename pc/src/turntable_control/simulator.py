@@ -138,6 +138,10 @@ class TurntableSimulator:
         status = RunStatus.MANUAL_STOPPED if self.mode is Mode.MANUAL else RunStatus.AUTOMATIC_ABORTED
         self._begin_stop(status)
 
+    def receive_heartbeat(self) -> None:
+        """Record a real heartbeat write without advancing simulated time."""
+        self._heartbeat_age_ms = 0
+
     def run_until_stopped(self, step_ms: int = 10, max_duration_ms: int = 500_000) -> None:
         """Run with healthy heartbeats until the current motion reaches standstill."""
         if type(step_ms) is not int or step_ms <= 0:
@@ -158,6 +162,11 @@ class TurntableSimulator:
             raise MotionRejected("events can only be acknowledged while not running")
         self.events.clear()
         self._buffer_pending = False
+
+    @property
+    def buffer_pending(self) -> bool:
+        """Whether the terminal run evidence is retained awaiting acknowledgement."""
+        return self._buffer_pending
 
     @property
     def _is_active(self) -> bool:
@@ -258,9 +267,11 @@ class TurntableSimulator:
     def _finish_completed(self) -> None:
         self.run_state = RunState.READY
         self.run_status = RunStatus.COMPLETED
+        self._buffer_pending = True
 
     def _finish_stop(self) -> None:
         self.run_state = RunState.READY
         self.velocity_deg_s = 0.0
         assert self._stop_status is not None
         self.run_status = self._stop_status
+        self._buffer_pending = True
