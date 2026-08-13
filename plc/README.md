@@ -202,3 +202,10 @@ rejected, because phase 1 has no verified compensation algorithm.
   non-retained and is a duration, not an absolute clock.
 - The 1000-scan communication watchdog is bounded but not safety-rated. A
   fault or controlled stop must be verified on the real hardware before use.
+
+## On-site record
+
+Use `docs/on-site-commissioning-checklist.md` as the controlled record for
+read-only network/protocol checks and the unloaded 1 degree/s first movement.
+Nothing in this reference source or its static tests is an AutoShop compile,
+download, direction, scaling, stopping-distance, or physical-safety result.

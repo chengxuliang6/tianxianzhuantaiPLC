@@ -83,4 +83,4 @@
 
 必须现场完成：AutoShop 实际编译与下载、EtherCAT PDO/轴状态、总减速比与轴缩放、正反方向、编码器位置、Modbus 多字字序、PLC 扫描抖动与对时误差、机械限位、停止距离及真实空载运动。逐项通过前不得把模拟结果当作硬件验收结果。
 
-详细证据见 `docs/verification-report.md`，开发过程见 `docs/worklog/2026-08-11-development-log.md`。
+详细证据见 `docs/verification-report.md`，现场按 `docs/on-site-commissioning-checklist.md` 执行，交付文件见 `docs/delivery-manifest.md`，开发过程见 `docs/worklog/2026-08-11-development-log.md`。
