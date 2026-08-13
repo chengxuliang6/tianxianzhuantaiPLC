@@ -1,0 +1,553 @@
+spec:
+  name: StateReceipt
+  version: '0.1'
+receipt:
+  id: sr_8d3607793927
+  created_at: '2026-08-13T15:41:55+08:00'
+  producer:
+    type: human
+    name: liangchengxu
+work:
+  id: TURNTABLE-PLC-CURRENT
+  objective: 记录天线测试转台当前软件、PLC参考程序、验证结果、安全限制和后续现场任务
+  state: in_progress
+snapshot:
+  artifacts:
+  - id: artifact-001
+    path: README.md
+    digest:
+      algorithm: sha256
+      value: 99b2eaae38b00b3d73f6bb91a4369ffc5fab8334aa47a260a74a548ba3338abc
+  - id: artifact-002
+    path: docs/AI_HANDOFF.md
+    digest:
+      algorithm: sha256
+      value: 0a0e61368dacc2949af1fdb8de99e5b377ffcc7d97ce8f25ca8f6d1499fe5512
+  - id: artifact-003
+    path: docs/delivery-manifest.md
+    digest:
+      algorithm: sha256
+      value: ab66347be645f7711b4460019d39209cfdcd4d47ad9812e027b4791c898c7a5e
+  - id: artifact-004
+    path: docs/verification-report.md
+    digest:
+      algorithm: sha256
+      value: 256ac0bc2856e5ed7a6c5e40bc1ecf10e5c01d4fac1ee764030b41026d4c2b17
+  - id: artifact-005
+    path: docs/on-site-commissioning-checklist.md
+    digest:
+      algorithm: sha256
+      value: 25ffddcaef9a6437d4db7349e76052aeba1166bbff10915fbd192543bdb1230d
+  - id: artifact-006
+    path: docs/worklog/2026-08-11-development-log.md
+    digest:
+      algorithm: sha256
+      value: c6a1d4c5b4693634dfbf52796559d51c86f10c6c30780744a8a4d9514fd79a26
+  - id: artifact-007
+    path: docs/superpowers/specs/2026-08-11-turntable-plc-motion-control-design.md
+    digest:
+      algorithm: sha256
+      value: caf672bac29473e9ee2dc305a027b9ac33e47895e4af71269b3e02f13867fe86
+  - id: artifact-008
+    path: docs/superpowers/plans/2026-08-11-turntable-control-implementation.md
+    digest:
+      algorithm: sha256
+      value: 0b0f69fbd03efc60680e1bd8c33987f8861580606c8ccfd5bc1431b15d2836d5
+  - id: artifact-009
+    path: plc/README.md
+    digest:
+      algorithm: sha256
+      value: 776b9f0e915326344f3f509e1189374798c9dc549e1835dbed66a48daaa74ecf
+  - id: artifact-010
+    path: plc/register-map.md
+    digest:
+      algorithm: sha256
+      value: 106c77b47c33dcd5e558df1f82960a08061c1429fb4e91136b1fbbdb4045cd3e
+  - id: artifact-011
+    path: pc/pyproject.toml
+    digest:
+      algorithm: sha256
+      value: 4aa9d87687e380f4c64d7104025ec8b0a57e478f5c89b51807fb25db75d27018
+  - id: artifact-012
+    path: plc/src/FB_DegreeLogger.st
+    digest:
+      algorithm: sha256
+      value: ee2be76d7d86bf197f6b19d4f961bf4c2f4d433451f778793232ca16d2d419d7
+  - id: artifact-013
+    path: plc/src/FB_TurntableControl.st
+    digest:
+      algorithm: sha256
+      value: 9ab5edfceb42f8e27267f12250dca410ed3ee88d55b6f18fe789dced727156bc
+  - id: artifact-014
+    path: plc/src/PRG_MAIN.st
+    digest:
+      algorithm: sha256
+      value: 138337ce1ca5dc76dad0b80e964e1a0e67f2e06344acffacbf999ce056e15201
+  - id: artifact-015
+    path: plc/src/Turntable_Constants.st
+    digest:
+      algorithm: sha256
+      value: c069e39081cf24904fac3f4e96ff5b930f7a99e90452996c4bea7a0f33d9bafd
+  - id: artifact-016
+    path: plc/src/Turntable_RegisterCodec.st
+    digest:
+      algorithm: sha256
+      value: d4b1fa1e37c207b1ad273f29fe697f49a92d56e4bf10235dff8ac9314e9123e7
+  - id: artifact-017
+    path: pc/src/turntable_control_entry.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 39294e1a7913a156c3c05c64964de833d0e2c0f52c597336583afc293d284f62
+  - id: artifact-018
+    path: pc/src/turntable_control/controller.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 27de7aa341cb9e141f5cb362cfc9c82c0ceef5085cd7db6691735041a3533ce2
+  - id: artifact-019
+    path: pc/src/turntable_control/csv_store.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: e5b5b0292147aa40f4882efe8b9b0d02f3b5192236f3886e63fd27d93b31d12b
+  - id: artifact-020
+    path: pc/src/turntable_control/domain.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 5d9fc975730266fe1600a09e1eb1d65dbcd1420e25ceae316824cf4f73fd281a
+  - id: artifact-021
+    path: pc/src/turntable_control/main.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 98377a72474bce6538ed724f4750c4583fae6bd794f97e05a93ee7f61a6e4943
+  - id: artifact-022
+    path: pc/src/turntable_control/modbus_client.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 9ba444fdbb57220b374f7a0f5185e9bf8229566060d399bf8fa635e92219c232
+  - id: artifact-023
+    path: pc/src/turntable_control/registers.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 7e42a623651f0452543613dd557e98d3326c228a2b5650da60e53293b60d0459
+  - id: artifact-024
+    path: pc/src/turntable_control/simulated_client.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: d65f9aa36b6c1b5d8aad1b727eb175c186372ba6c59bbf1f904cf17a6e691736
+  - id: artifact-025
+    path: pc/src/turntable_control/simulator.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: e20b73f5fd4b6e6d1941cc580440b8074bb0e06d8946aa7383c75cf64ecef11c
+  - id: artifact-026
+    path: pc/src/turntable_control/time_sync.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 4ba0ab3d72049403f13f425ae2655a9b4d1e078d1f7410690e93a9ac59060bca
+  - id: artifact-027
+    path: pc/src/turntable_control/ui.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: e2b290bccdb6c29b6ff3187129f8c111c5e5c8b4115fcacee00193e57b475975
+  - id: artifact-028
+    path: pc/src/turntable_control/__init__.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 09d9f01641469e66ee61fe6d0127e67ff2541160af46bc515360ea3b27e8f922
+  - id: artifact-029
+    path: pc/tests/test_controller.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 8c040624d30695d5eaca57e53b06c9385bcea71e8a268933e8f0a093eb9ac6c0
+  - id: artifact-030
+    path: pc/tests/test_csv_store.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 6b1583db175e9a1c983479d316cca31c34fa5d49be4b4ff408fc9516507f1958
+  - id: artifact-031
+    path: pc/tests/test_degree_events.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 470d505f374317f99203c50a59f7a88cd3e49784de3542cbba4e03c953b096bb
+  - id: artifact-032
+    path: pc/tests/test_domain.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: e7afbab1073f89a7b04517fa22ffe1405846e7178274cb80898219b85988fd06
+  - id: artifact-033
+    path: pc/tests/test_end_to_end.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 1af3f8cf439684d1e23993df12c9c863fadb31edb69894f897b75bb382a4b84b
+  - id: artifact-034
+    path: pc/tests/test_modbus_client.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: b4f56e279a2643303c35103c0e94d879b494a426537f798590a591c000a18d6f
+  - id: artifact-035
+    path: pc/tests/test_plc_source_contract.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: fcb3a28d77a9d1d330d887b7505eeab1bb6b7f47ca6dc9cee2e166a55f7a130b
+  - id: artifact-036
+    path: pc/tests/test_registers.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: f4bd97f974aee2af1ef00410d5be3e6f20a55536366e71e0ed010c99c08f318f
+  - id: artifact-037
+    path: pc/tests/test_simulated_client.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 85035ea18e320c9e111869c2dc5d344be863497ec50f7d438710276f1139a6b5
+  - id: artifact-038
+    path: pc/tests/test_simulator_motion.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: c33d3197780f7aadd49ad38147dc97c4fdcbe37248d2d0302d42cceda6c4593c
+  - id: artifact-039
+    path: pc/tests/test_smoke.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: debe8f2d30602f59a654d8870ad89f082bafc1b0a397fee2caac6e57582e041d
+  - id: artifact-040
+    path: pc/tests/test_time_sync.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: cf0afcb826831e78f3ecf27700b00f3d8dcafe2370be61a489b9e341d062f99a
+  - id: artifact-041
+    path: pc/tests/test_ui.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 9aa251951ee135d87b43f6c58fc38cfe2ea18538f3ec114e0b7ab2530bb17508
+  repository:
+    vcs: git
+    commit: b45d980ea721fb071677079e16155cd530443cdb
+    dirty: true
+claims:
+- id: claim-capture
+  kind: observation
+  statement: The listed artifacts were captured at receipt creation time.
+  source:
+    type: tool
+    ref: statereceipt capture
+  verification:
+    status: supported
+  supported_by:
+  - evidence-artifact-001
+  - evidence-artifact-002
+  - evidence-artifact-003
+  - evidence-artifact-004
+  - evidence-artifact-005
+  - evidence-artifact-006
+  - evidence-artifact-007
+  - evidence-artifact-008
+  - evidence-artifact-009
+  - evidence-artifact-010
+  - evidence-artifact-011
+  - evidence-artifact-012
+  - evidence-artifact-013
+  - evidence-artifact-014
+  - evidence-artifact-015
+  - evidence-artifact-016
+  - evidence-artifact-017
+  - evidence-artifact-018
+  - evidence-artifact-019
+  - evidence-artifact-020
+  - evidence-artifact-021
+  - evidence-artifact-022
+  - evidence-artifact-023
+  - evidence-artifact-024
+  - evidence-artifact-025
+  - evidence-artifact-026
+  - evidence-artifact-027
+  - evidence-artifact-028
+  - evidence-artifact-029
+  - evidence-artifact-030
+  - evidence-artifact-031
+  - evidence-artifact-032
+  - evidence-artifact-033
+  - evidence-artifact-034
+  - evidence-artifact-035
+  - evidence-artifact-036
+  - evidence-artifact-037
+  - evidence-artifact-038
+  - evidence-artifact-039
+  - evidence-artifact-040
+  - evidence-artifact-041
+  depends_on:
+    artifacts:
+    - artifact-001
+    - artifact-002
+    - artifact-003
+    - artifact-004
+    - artifact-005
+    - artifact-006
+    - artifact-007
+    - artifact-008
+    - artifact-009
+    - artifact-010
+    - artifact-011
+    - artifact-012
+    - artifact-013
+    - artifact-014
+    - artifact-015
+    - artifact-016
+    - artifact-017
+    - artifact-018
+    - artifact-019
+    - artifact-020
+    - artifact-021
+    - artifact-022
+    - artifact-023
+    - artifact-024
+    - artifact-025
+    - artifact-026
+    - artifact-027
+    - artifact-028
+    - artifact-029
+    - artifact-030
+    - artifact-031
+    - artifact-032
+    - artifact-033
+    - artifact-034
+    - artifact-035
+    - artifact-036
+    - artifact-037
+    - artifact-038
+    - artifact-039
+    - artifact-040
+    - artifact-041
+    evidence:
+    - evidence-artifact-001
+    - evidence-artifact-002
+    - evidence-artifact-003
+    - evidence-artifact-004
+    - evidence-artifact-005
+    - evidence-artifact-006
+    - evidence-artifact-007
+    - evidence-artifact-008
+    - evidence-artifact-009
+    - evidence-artifact-010
+    - evidence-artifact-011
+    - evidence-artifact-012
+    - evidence-artifact-013
+    - evidence-artifact-014
+    - evidence-artifact-015
+    - evidence-artifact-016
+    - evidence-artifact-017
+    - evidence-artifact-018
+    - evidence-artifact-019
+    - evidence-artifact-020
+    - evidence-artifact-021
+    - evidence-artifact-022
+    - evidence-artifact-023
+    - evidence-artifact-024
+    - evidence-artifact-025
+    - evidence-artifact-026
+    - evidence-artifact-027
+    - evidence-artifact-028
+    - evidence-artifact-029
+    - evidence-artifact-030
+    - evidence-artifact-031
+    - evidence-artifact-032
+    - evidence-artifact-033
+    - evidence-artifact-034
+    - evidence-artifact-035
+    - evidence-artifact-036
+    - evidence-artifact-037
+    - evidence-artifact-038
+    - evidence-artifact-039
+    - evidence-artifact-040
+    - evidence-artifact-041
+evidence:
+- id: evidence-artifact-001
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-001
+- id: evidence-artifact-002
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-002
+- id: evidence-artifact-003
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-003
+- id: evidence-artifact-004
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-004
+- id: evidence-artifact-005
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-005
+- id: evidence-artifact-006
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-006
+- id: evidence-artifact-007
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-007
+- id: evidence-artifact-008
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-008
+- id: evidence-artifact-009
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-009
+- id: evidence-artifact-010
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-010
+- id: evidence-artifact-011
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-011
+- id: evidence-artifact-012
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-012
+- id: evidence-artifact-013
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-013
+- id: evidence-artifact-014
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-014
+- id: evidence-artifact-015
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-015
+- id: evidence-artifact-016
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-016
+- id: evidence-artifact-017
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-017
+- id: evidence-artifact-018
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-018
+- id: evidence-artifact-019
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-019
+- id: evidence-artifact-020
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-020
+- id: evidence-artifact-021
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-021
+- id: evidence-artifact-022
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-022
+- id: evidence-artifact-023
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-023
+- id: evidence-artifact-024
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-024
+- id: evidence-artifact-025
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-025
+- id: evidence-artifact-026
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-026
+- id: evidence-artifact-027
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-027
+- id: evidence-artifact-028
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-028
+- id: evidence-artifact-029
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-029
+- id: evidence-artifact-030
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-030
+- id: evidence-artifact-031
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-031
+- id: evidence-artifact-032
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-032
+- id: evidence-artifact-033
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-033
+- id: evidence-artifact-034
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-034
+- id: evidence-artifact-035
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-035
+- id: evidence-artifact-036
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-036
+- id: evidence-artifact-037
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-037
+- id: evidence-artifact-038
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-038
+- id: evidence-artifact-039
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-039
+- id: evidence-artifact-040
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-040
+- id: evidence-artifact-041
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-041
+continuation:
+  next_actions: []
+  unresolved: []
