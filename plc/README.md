@@ -133,12 +133,14 @@ after the PC has durably saved it without a PLC restart.
    Do not use `MC_ImmediateStop`; it is not used here. `MC_Stop` is only a
    controlled software deceleration and is not a physical emergency stop.
 
-8. **Commissioning page.** With platform unloaded, start at 1 degrees/s only:
-   verify axis disabled/enable, manual set zero, CW/CCW physical direction,
-   software stop, heartbeat cable-disconnect stop, software limits, and one
-   turn/event count. Do not use high speed or load: there is no physical
-   emergency stop. The communication heartbeat reduces risk but is not a
-   safety-rated watchdog.
+8. **Commissioning page.** With platform unloaded, use 1 degrees/s only and
+   make an approximately 1 degree CW/CCW small displacement, stopping
+   immediately. Verify axis disabled/enable, manual set zero, CW/CCW physical
+   direction, software stop, heartbeat cable-disconnect stop, and software
+   limits. Full-turn/event-count hardware verification is not approved in this phase and needs a separately approved future procedure; simulator-only
+   full-turn/event-count checks may remain. Do not use high speed or load:
+   there is no physical emergency stop. The communication heartbeat reduces
+   risk but is not a safety-rated watchdog.
 
 ## PLCopen and command behavior
 

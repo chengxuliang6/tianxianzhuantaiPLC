@@ -240,6 +240,7 @@ def test_delivery_docs_state_only_the_protocol_v2_commissioning_contract() -> No
             ROOT / "docs" / "on-site-commissioning-checklist.md",
             ROOT / "docs" / "verification-report.md",
             ROOT / "docs" / "delivery-manifest.md",
+            PLC / "README.md",
         )
     }
     checklist = docs[ROOT / "docs" / "on-site-commissioning-checklist.md"]
@@ -247,7 +248,12 @@ def test_delivery_docs_state_only_the_protocol_v2_commissioning_contract() -> No
         assert token in checklist
     assert "重启后旧事件字无效" in checklist
 
-    obsolete_current_contracts = ("D1000", "D1100", "D1200", "D1201:D1202", "协议版本 `1`")
+    plc_readme = docs[PLC / "README.md"]
+    assert "approximately 1 degree CW/CCW small displacement" in plc_readme
+    assert "Full-turn/event-count hardware verification is not approved in this phase" in plc_readme
+    assert "one turn/event count" not in plc_readme
+
+    obsolete_current_contract = re.compile(r"\bD(?:10\d{2}|11\d{2}|120[0-6])\b")
     for path, text in docs.items():
-        for obsolete in obsolete_current_contracts:
-            assert obsolete not in text, f"{path}: {obsolete} is not a current v2 contract"
+        assert not obsolete_current_contract.search(text), f"{path}: v1 D1000:D1206 is not a current v2 contract"
+        assert "协议版本 `1`" not in text, f"{path}: protocol v1 is not a current v2 contract"
