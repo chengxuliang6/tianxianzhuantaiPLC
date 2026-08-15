@@ -257,3 +257,12 @@ def test_delivery_docs_state_only_the_protocol_v2_commissioning_contract() -> No
     for path, text in docs.items():
         assert not obsolete_current_contract.search(text), f"{path}: v1 D1000:D1206 is not a current v2 contract"
         assert "协议版本 `1`" not in text, f"{path}: protocol v1 is not a current v2 contract"
+
+
+def test_plc_readme_defers_physical_direction_verification_to_controlled_commissioning() -> None:
+    readme = (PLC / "README.md").read_text(encoding="utf-8")
+    pre_commissioning, heading, _ = readme.partition("8. **Commissioning page.**")
+
+    assert heading
+    assert "Verify positive direction" not in pre_commissioning
+    assert "unloaded 1 degrees/s" not in pre_commissioning

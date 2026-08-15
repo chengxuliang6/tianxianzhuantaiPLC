@@ -107,9 +107,10 @@ after the PC has durably saved it without a PLC restart.
 4. **Axis page.** Configure `Axis_0` as a linear axis/user-unit representation
    so calls use turntable degrees and degrees/s (not motor turns). The total
    ratio is `50:1`: 5:1 gears times a 10:1 planetary reducer. The motor encoder
-   is 23-bit. Verify positive direction at unloaded 1 degrees/s. Do **not**
-   hard-code a guessed pulse scaling; inspect AutoShop's axis-wizard scaling
-   fields and use their documented meaning.
+   is 23-bit. Inspect the configured positive-direction mapping in the Axis
+   page only; do not enable or command physical motion during this offline
+   configuration. Do **not** hard-code a guessed pulse scaling; inspect
+   AutoShop's axis-wizard scaling fields and use their documented meaning.
 
 5. **Limit/task page.** Set position software limits to -360 and +360 degrees.
    Set the EtherCAT period to 1 ms and schedule `PRG_MAIN` at a constant 1 ms
