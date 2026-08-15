@@ -954,24 +954,81 @@ def test_communication_failure_disconnects_immediately_and_clears_pending_start(
 
 
 def test_plc_restart_discards_stale_controller_session_and_time_sync() -> None:
-    from turntable_control.modbus_client import ProtocolMismatch
+    from turntable_control.modbus_client import PlcRestartDetected
 
     client = FakeClient()
     clock = FakeClock()
-    controller = make_controller(client, clock=clock)
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    controller = make_controller(client, clock=clock, sync=sync)
     connect_controller(controller)
     controller.start(Mode.AUTO, Direction.CW, 1.0)
     controller.process_once()
     assert controller._run_session is not None
     assert controller._pending_sync is not None
 
-    client.fail_next["read_status"] = ProtocolMismatch("PLC restart detected")
+    client.fail_next["read_status"] = PlcRestartDetected("PLC restart detected")
     clock.advance(100)
     controller.process_once()
 
     assert not controller.snapshot.connected
     assert controller._run_session is None
     assert controller._pending_sync is None
+    assert sync.sample_count == 0
+
+
+def test_restart_blocks_post_restart_export_and_ack_without_a_new_clock_sample(tmp_path: Path) -> None:
+    from turntable_control.csv_store import CsvStore
+    from turntable_control.modbus_client import PlcRestartDetected
+
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    controller = make_controller(client, clock=clock, sync=sync, store=CsvStore(tmp_path))
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    client.fail_next["read_status"] = PlcRestartDetected("PLC restart detected")
+    clock.advance(100)
+    controller.process_once()
+
+    controller.connect()
+    controller.process_once()
+    controller.start(Mode.MANUAL, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=2,
+        event_count=1,
+        event_generation=2,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    clock.advance(100)
+    controller.process_once()
+
+    assert sync.sample_count == 0
+    assert not list(tmp_path.glob("*.csv"))
+    assert "acknowledge_buffer" not in [call[0] for call in client.calls]
+    assert "clock sample" in (controller.snapshot.last_error or "")
+
+
+def test_restart_during_start_send_uses_restart_cleanup() -> None:
+    from turntable_control.modbus_client import PlcRestartDetected
+
+    client = FakeClient()
+    controller = make_controller(client)
+    connect_controller(controller)
+    client.fail_next["send_start"] = PlcRestartDetected("PLC restart detected")
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+
+    controller.process_once()
+
+    assert not controller.snapshot.connected
+    assert controller._run_session is None
+    assert controller._uncertain_start is None
 
 
 def test_definite_pre_start_write_failure_clears_pending_guard() -> None:
@@ -1178,7 +1235,7 @@ def test_uncertain_reconciliation_cannot_silently_clear_a_concurrent_start() -> 
     assert [call[0] for call in client.calls].count("send_start") == 2
 
 
-def test_exact_unknown_start_stays_blocked_while_command_is_pending_in_d1003() -> None:
+def test_exact_unknown_start_stays_blocked_while_command_is_pending_in_d3() -> None:
     client = FakeClient()
     controller = make_controller(client)
     connect_controller(controller)
@@ -1194,7 +1251,8 @@ def test_exact_unknown_start_stays_blocked_while_command_is_pending_in_d1003() -
     with pytest.raises(CommandRejected):
         controller.start(Mode.MANUAL, Direction.CCW, 5.0)
     assert [call[0] for call in client.calls].count("send_start") == 1
-    assert "D1003" in (controller.snapshot.last_error or "")
+    assert "D3" in (controller.snapshot.last_error or "")
+    assert "D1003" not in (controller.snapshot.last_error or "")
 
 
 def test_exact_unknown_start_treats_exact_ack_ready_idle_as_conflict() -> None:

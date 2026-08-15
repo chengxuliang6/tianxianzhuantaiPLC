@@ -49,6 +49,10 @@ class ClockSynchronizer:
     def sample_count(self) -> int:
         return len(self._samples)
 
+    def reset(self) -> None:
+        """Discard samples that belong to a prior PLC lifetime."""
+        self._samples.clear()
+
     def add_sample(self, pc_send_ms: int, plc_ms: int, pc_recv_ms: int) -> ClockSample:
         """Record a request/response observation and return its immutable sample."""
         _validate_epoch_ms(pc_send_ms, "pc_send_ms")

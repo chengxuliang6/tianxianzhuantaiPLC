@@ -21,6 +21,7 @@ from .domain import (
 from .csv_store import RunExport, RunMetadata
 from .modbus_client import (
     CommunicationError,
+    PlcRestartDetected,
     ProtocolMismatch,
     StartNotIssued,
     StartOutcomeUnknown,
@@ -656,7 +657,7 @@ class TurntableController:
             return "启动序号不可知，禁止自动归属；需要人工对账", None
         command_seq = self._observed_start_command_seq
         if command_seq is None:
-            return "缺少重连后D1003 START_SEQ观测值；需要人工对账", None
+            return "缺少重连后D3 START_SEQ观测值；需要人工对账", None
         buffer_ready = bool(status.status_flags & STATUS_BUFFER_READY)
         expected_running_state = (
             RunState.AUTO_RUNNING if uncertain.command.mode is Mode.AUTO else RunState.MANUAL_RUNNING
@@ -716,7 +717,7 @@ class TurntableController:
             self._pending_start = None
             return None, None
         if exact_command and not exact_ack:
-            return "D1003 START_SEQ仍为待确认启动序号；禁止新START，需要人工对账", None
+            return "D3 START_SEQ仍为待确认启动序号；禁止新START，需要人工对账", None
         return "启动确认序号或PLC状态/缓冲区与不确定START冲突；需要人工对账", None
 
     def _attempt_download(
@@ -1002,7 +1003,7 @@ class TurntableController:
                 pass
 
     def _handle_communication_error(self, error: Exception) -> None:
-        restart_detected = isinstance(error, ProtocolMismatch) and "restart" in str(error).lower()
+        restart_detected = isinstance(error, PlcRestartDetected)
         try:
             self._client.close()
         except Exception:
@@ -1022,6 +1023,7 @@ class TurntableController:
                 self._generation_test_ids.clear()
                 self._ack_attempts.clear()
                 self._durable_recovery = None
+                self._clock_sync.reset()
         self._pending_sync = None
         self._observed_start_command_seq = None
         self._next_poll_ms = None

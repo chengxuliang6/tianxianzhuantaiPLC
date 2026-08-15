@@ -48,6 +48,18 @@ def test_clock_sync_requires_a_sample_before_conversion() -> None:
         ClockSynchronizer().to_epoch_ms(0)
 
 
+def test_clock_sync_reset_discards_all_samples() -> None:
+    sync = ClockSynchronizer()
+    sync.add_sample(pc_send_ms=1_000, plc_ms=500, pc_recv_ms=1_000)
+
+    sync.reset()
+
+    assert sync.sample_count == 0
+    assert sync.best_sample is None
+    with pytest.raises(ClockNotSynchronized):
+        sync.to_epoch_ms(500)
+
+
 def test_clock_sync_maps_ticks_across_u32_wrap_in_both_directions() -> None:
     sync = ClockSynchronizer()
     sync.add_sample(pc_send_ms=10_000, plc_ms=0xFFFF_FFFE, pc_recv_ms=10_000)

@@ -199,6 +199,23 @@ def test_plc_tick_restart_invalidates_session_before_any_write(fake_transport: F
     assert fake_transport.write_calls == []
 
 
+def test_start_propagates_restart_from_its_status_recheck_without_writes(
+    fake_transport: FakeTransport,
+) -> None:
+    from turntable_control.modbus_client import PlcRestartDetected
+
+    client = make_client(fake_transport)
+    connect(client)
+    fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(encode_u32(50_000))
+    client.read_status()
+    fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(encode_u32(10))
+
+    with pytest.raises(PlcRestartDetected):
+        client.send_start(Mode.AUTO, Direction.CW, 1)
+
+    assert fake_transport.write_calls == []
+
+
 def test_read_events_chunks_360_records_without_reading_past_fixed_buffer(fake_transport: FakeTransport) -> None:
     client = make_client(fake_transport)
     connect(client)
@@ -309,6 +326,8 @@ def test_small_commands_heartbeat_and_time_sync_use_raw_sequences(fake_transport
 def test_close_is_idempotent_and_sequence_increments_are_thread_safe(fake_transport: FakeTransport) -> None:
     client = make_client(fake_transport)
     connect(client)
+    fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(encode_u32(50_000))
+    client.read_status()
     results: list[int] = []
     threads = [Thread(target=lambda: results.append(client.send_stop())) for _ in range(8)]
     for thread in threads:
@@ -320,6 +339,7 @@ def test_close_is_idempotent_and_sequence_increments_are_thread_safe(fake_transp
     client.close()
     client.close()
     assert fake_transport.close_calls == 1
+    assert client._last_plc_tick_ms is None
 
 
 @pytest.mark.parametrize("failure", ["error", "exception"])

@@ -34,6 +34,10 @@ class ProtocolMismatch(CommunicationError):
     """The connected PLC does not implement the expected register contract."""
 
 
+class PlcRestartDetected(ProtocolMismatch):
+    """A verified PLC tick rolled back outside the valid u32 forward range."""
+
+
 class StartNotIssued(CommunicationError):
     """START_SEQ was definitely not written, although earlier parameter writes may be uncertain."""
 
@@ -167,7 +171,7 @@ class TurntableModbusClient:
 
     @property
     def start_command_seq(self) -> int:
-        """Return the command-side D1003 value observed by this verified session."""
+        """Return the command-side D3 value observed by this verified session."""
         with self._lock:
             self._require_verified()
             return self._sequences[Register.START_SEQ]
@@ -219,6 +223,7 @@ class TurntableModbusClient:
         with self._lock:
             self._verified = False
             self._sequences.clear()
+            self._last_plc_tick_ms = None
             if not self._transport_open:
                 return
             try:
@@ -253,7 +258,7 @@ class TurntableModbusClient:
                 (plc_tick_ms - self._last_plc_tick_ms) & 0xFFFF_FFFF
             ) >= 0x8000_0000:
                 self._invalidate_session()
-                raise ProtocolMismatch("PLC tick rollback indicates restart")
+                raise PlcRestartDetected("PLC tick rollback indicates restart")
             self._last_plc_tick_ms = plc_tick_ms
             return StatusSnapshot(
                 run_state=_enum_or_raw(RunState, status[0]),
@@ -325,6 +330,8 @@ class TurntableModbusClient:
                 self._write_register(Register.MODE, int(mode), "mode")
                 self._write_register(Register.DIRECTION, int(direction) & 0xFFFF, "direction")
                 self._write_register(Register.SPEED_INDEX, speed_index, "speed index")
+            except PlcRestartDetected:
+                raise
             except CommunicationError as error:
                 raise StartNotIssued(str(error), start_seq) from error
             try:
