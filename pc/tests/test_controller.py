@@ -55,6 +55,8 @@ class FakeClient:
         self.sync_seq = 0
         self.fail_next: dict[str, Exception] = {}
         self.events: list[EventRecord] = []
+        self.status_after_event_read: StatusSnapshot | None = None
+        self.failure_after_event_read: Exception | None = None
         self.io_threads: list[int] = []
         self.call_event = Event()
 
@@ -123,7 +125,12 @@ class FakeClient:
     def read_events(self, count: int) -> list[EventRecord]:
         self.calls.append(("read_events", count))
         self._fail("read_events")
-        return self.events[:count]
+        events = self.events[:count]
+        if self.status_after_event_read is not None:
+            self.status = self.status_after_event_read
+        if self.failure_after_event_read is not None:
+            self.fail_next["read_status"] = self.failure_after_event_read
+        return events
 
     def acknowledge_buffer(self) -> int:
         self.calls.append(("acknowledge_buffer",))
@@ -1599,6 +1606,143 @@ def test_terminal_pipeline_uses_exact_run_start_and_orders_read_save_ack(
     assert not controller.snapshot.download_pending
 
 
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        {"run_state": RunState.FAULT},
+        {"run_status": RunStatus.COMMUNICATION_ABORTED},
+        {"start_ack_seq": 2},
+        {"event_count": 0},
+        {"event_generation": 8},
+        {"run_start_plc_ms": 101},
+        {"status_flags": 0x0003},
+        {"protocol_version": 1},
+        {"word_order_probe": 0x5678_1234},
+    ],
+    ids=(
+        "run-state",
+        "run-status",
+        "start-ack",
+        "event-count",
+        "generation",
+        "run-start-tick",
+        "buffer-ready",
+        "protocol-version",
+        "word-order",
+    ),
+)
+def test_event_read_requires_an_unchanged_terminal_buffer_fingerprint(
+    tmp_path: Path, mismatch: dict[str, object]
+) -> None:
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.MANUAL, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    terminal = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=7,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    client.status = terminal
+    client.status_after_event_read = replace(terminal, **mismatch)
+
+    clock.advance(100)
+    controller.process_once()
+
+    assert not store.exports
+    assert "acknowledge_buffer" not in [call[0] for call in client.calls]
+    assert controller.snapshot.download_pending
+    assert "fingerprint" in (controller.snapshot.last_error or "")
+
+
+def test_plc_reboot_during_event_read_invalidates_before_save_or_ack(tmp_path: Path) -> None:
+    from turntable_control.modbus_client import PlcRestartDetected
+
+    client = FakeClient()
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = FakeStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.MANUAL, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=7,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    client.failure_after_event_read = PlcRestartDetected("PLC restart detected")
+    client.calls.clear()
+
+    clock.advance(100)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls] == ["read_status", "read_events", "read_status", "close"]
+    assert not store.exports
+    assert "acknowledge_buffer" not in [call[0] for call in client.calls]
+    assert not controller.snapshot.connected
+
+
+def test_plc_reboot_after_persistence_invalidates_before_ack(tmp_path: Path) -> None:
+    from turntable_control.modbus_client import PlcRestartDetected
+
+    client = FakeClient()
+
+    class RebootAfterSaveStore(FakeStore):
+        def save_run(self, run: object, synchronizer: ClockSynchronizer) -> Path:
+            path = super().save_run(run, synchronizer)
+            client.fail_next["read_status"] = PlcRestartDetected("PLC restart detected")
+            return path
+
+    clock = FakeClock()
+    sync = ClockSynchronizer()
+    sync.add_sample(1_000, 100, 1_000)
+    store = RebootAfterSaveStore(tmp_path, client.calls)
+    controller = make_controller(client, clock=clock, sync=sync, store=store)
+    connect_controller(controller)
+    controller.start(Mode.MANUAL, Direction.CW, 1.0)
+    controller.process_once()
+    client.events = [EventRecord(1, 1, 1.0, 10)]
+    client.status = ready_status(
+        status_flags=0x000B,
+        start_ack_seq=1,
+        event_count=1,
+        event_generation=7,
+        run_status=RunStatus.MANUAL_STOPPED,
+        run_start_plc_ms=100,
+    )
+    client.calls.clear()
+
+    clock.advance(100)
+    controller.process_once()
+
+    assert [call[0] for call in client.calls] == [
+        "read_status",
+        "read_events",
+        "read_status",
+        "save_run",
+        "read_status",
+        "close",
+    ]
+    assert len(store.exports) == 1
+    assert "acknowledge_buffer" not in [call[0] for call in client.calls]
+    assert not controller.snapshot.connected
+
+
 def test_terminal_pipeline_rejects_a_travel_angle_gap_without_ack(tmp_path: Path) -> None:
     client = FakeClient()
     clock = FakeClock()
@@ -1799,8 +1943,19 @@ def test_ack_uncertainty_with_cleared_buffer_seals_session_for_later_stop(tmp_pa
         {"run_status": RunStatus.COMMUNICATION_ABORTED},
         {"run_start_plc_ms": 101},
         {"run_state": RunState.AUTO_RUNNING},
+        {"protocol_version": 1},
+        {"word_order_probe": 0x5678_1234},
     ],
-    ids=("start-ack", "generation", "event-count", "terminal-status", "run-start-tick", "run-state"),
+    ids=(
+        "start-ack",
+        "generation",
+        "event-count",
+        "terminal-status",
+        "run-start-tick",
+        "run-state",
+        "protocol-version",
+        "word-order",
+    ),
 )
 def test_ack_recovery_refuses_any_buffer_fingerprint_mismatch(
     tmp_path: Path, mismatch: dict[str, object]

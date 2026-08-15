@@ -101,6 +101,7 @@ class _DurableRecovery:
     run_start_plc_ms: int
     test_id: str
     path: Path
+    status_fingerprint: tuple[object, ...]
 
     def matches(
         self,
@@ -119,6 +120,7 @@ class _DurableRecovery:
             and status.run_state is self.run_state
             and status.run_status is self.run_status
             and status.run_start_plc_ms == self.run_start_plc_ms
+            and _terminal_buffer_fingerprint(status) == self.status_fingerprint
         )
 
 
@@ -131,6 +133,20 @@ _TERMINAL_RUN_STATUSES = frozenset(
         RunStatus.FAULTED,
     )
 )
+
+
+def _terminal_buffer_fingerprint(status: StatusSnapshot) -> tuple[object, ...]:
+    return (
+        status.run_state,
+        status.run_status,
+        status.start_ack_seq,
+        status.event_count,
+        status.event_generation,
+        status.run_start_plc_ms,
+        bool(status.status_flags & STATUS_BUFFER_READY),
+        status.protocol_version,
+        status.word_order_probe,
+    )
 
 
 class TurntableController:
@@ -790,6 +806,12 @@ class TurntableController:
         try:
             events = self._client.read_events(status.event_count)
             self._validate_event_integrity(events, status, session)
+            refreshed_status = self._client.read_status()
+            if _terminal_buffer_fingerprint(refreshed_status) != _terminal_buffer_fingerprint(status):
+                self._download_failed(
+                    "PLC terminal buffer fingerprint changed while reading events; refusing persistence and ACK"
+                )
+                return
             path = Path(self._csv_store.save_run(RunExport(metadata=metadata, events=events), self._clock_sync))
         except (CommunicationError, ProtocolMismatch):
             raise
@@ -806,6 +828,7 @@ class TurntableController:
             run_start_plc_ms=status.run_start_plc_ms,
             test_id=test_id,
             path=path,
+            status_fingerprint=_terminal_buffer_fingerprint(status),
         )
         self._durable_recovery = recovery
         self._publish(
@@ -856,6 +879,12 @@ class TurntableController:
     def _acknowledge_recovery(self, recovery: _DurableRecovery) -> None:
         key = (self._verified_session, recovery.generation)
         if key in self._ack_attempts:
+            return
+        refreshed_status = self._client.read_status()
+        if not recovery.matches(refreshed_status, self._run_session, self.snapshot):
+            self._download_failed(
+                "PLC terminal buffer fingerprint changed after CSV persistence; refusing ACK and retaining recovery"
+            )
             return
         self._ack_attempts.add(key)
         self._client.acknowledge_buffer()

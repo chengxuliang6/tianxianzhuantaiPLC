@@ -247,6 +247,33 @@ def test_delivery_docs_state_only_the_protocol_v2_commissioning_contract() -> No
     for token in ("D0:D19", "D100:D120", "D200:D206", "D2000:D4159", "协议版本 `2`", "D200:D202", "0x1234", "0x5678", "反转=-1"):
         assert token in checklist
     assert "重启后旧事件字无效" in checklist
+    normalized_checklist = " ".join(checklist.split())
+    compile_gate = "AutoShop 编译为 `0 error`、`0 warning`"
+    authorization_gate = "操作员一次性明确授权通过 Type-C 下载协议 v2 程序"
+    download_gate = "下载期间电脑端不得连接 Modbus、不得产生任何 PC 写入、不得使能伺服或运动"
+    read_only_gate = "下载完成并重新连接后，首先只读 `D200:D202`"
+    static_gate = "只读状态块 `D100:D120`，确认静态安全状态"
+    write_gate = "以上下载后只读门禁全部通过前，禁止任何 PC Modbus 写入"
+    controlled_motion = "首次空载、1°/s、极小位移验证"
+    for token in (
+        compile_gate,
+        authorization_gate,
+        download_gate,
+        read_only_gate,
+        static_gate,
+        write_gate,
+        controlled_motion,
+    ):
+        assert token in normalized_checklist
+    assert (
+        normalized_checklist.index(compile_gate)
+        < normalized_checklist.index(authorization_gate)
+        < normalized_checklist.index(download_gate)
+        < normalized_checklist.index(read_only_gate)
+        < normalized_checklist.index(static_gate)
+        < normalized_checklist.index(write_gate)
+        < normalized_checklist.index(controlled_motion)
+    )
 
     plc_readme = docs[PLC / "README.md"]
     assert "approximately 1 degree CW/CCW small displacement" in plc_readme
@@ -274,7 +301,7 @@ def test_plc_readme_defers_physical_direction_verification_to_controlled_commiss
 
     normalized = " ".join(readme.split())
     offline_compile = "then compile offline to zero errors before considering a download."
-    read_only_gate = "Read and verify the D0201/D0202 `0x1234`/`0x5678` word-order probe before any hardware write."
+    read_only_gate = "After that download, reconnect read-only and verify D0200 is `2` and D0201/D0202 are `0x1234`/`0x5678` before any PC Modbus write."
     download_authorization = "Download only while the user is present and documented safety preconditions are met."
     controlled_motion = "approximately 1 degree CW/CCW small displacement"
-    assert normalized.index(offline_compile) < normalized.index(read_only_gate) < normalized.index(download_authorization) < normalized.index(controlled_motion)
+    assert normalized.index(offline_compile) < normalized.index(download_authorization) < normalized.index(read_only_gate) < normalized.index(controlled_motion)

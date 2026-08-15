@@ -10,9 +10,9 @@ then compile offline to zero errors before considering a download.
 `register-map.md` is the sole normative Modbus address contract. Every wire
 register below is one `INT`; do not bind a `DINT` or `REAL` directly to D words.
 Use `FC_DecodeI32`/`FC_SplitI32` for high-word-first signed 32-bit values and
-`FC_SplitU32` for raw unsigned tick values. Read
-and verify the D0201/D0202 `0x1234`/`0x5678` word-order probe before any hardware
-write. If it differs, stop and correct the single PC codec and this contract.
+`FC_SplitU32` for raw unsigned tick values. The D0200:D0202 probe is a
+post-download read-only gate before PC Modbus writes; it is not a prerequisite
+for the initial user-authorized USB download to an old or empty PLC.
 
 ## Variable table: MODBUS_D
 
@@ -131,6 +131,8 @@ after the PC has durably saved it without a PLC restart.
 7. **Download page.** Download only while the user is present and documented
    safety preconditions are met. Leave AutoShop online axis-debug mode before
    issuing PLC motion commands: concurrent online axis debug causes error 9116.
+   Keep the servo disabled and stationary, disconnect the PC Modbus client, and
+   permit no motion during the download. After that download, reconnect read-only and verify D0200 is `2` and D0201/D0202 are `0x1234`/`0x5678` before any PC Modbus write.
    Do not use `MC_ImmediateStop`; it is not used here. `MC_Stop` is only a
    controlled software deceleration and is not a physical emergency stop.
 
