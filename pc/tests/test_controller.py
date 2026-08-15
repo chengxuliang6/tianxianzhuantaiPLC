@@ -36,7 +36,7 @@ def ready_status(**changes: object) -> StatusSnapshot:
         event_generation=0,
         run_status=RunStatus.IDLE,
         run_start_plc_ms=0,
-        protocol_version=1,
+        protocol_version=2,
         word_order_probe=0x12345678,
         time_sync_request_seq=0,
         plc_tick_ms=100,
@@ -951,6 +951,27 @@ def test_communication_failure_disconnects_immediately_and_clears_pending_start(
     controller.connect()
     controller.process_once()
     assert [call[0] for call in client.calls].count("send_start") == 0
+
+
+def test_plc_restart_discards_stale_controller_session_and_time_sync() -> None:
+    from turntable_control.modbus_client import ProtocolMismatch
+
+    client = FakeClient()
+    clock = FakeClock()
+    controller = make_controller(client, clock=clock)
+    connect_controller(controller)
+    controller.start(Mode.AUTO, Direction.CW, 1.0)
+    controller.process_once()
+    assert controller._run_session is not None
+    assert controller._pending_sync is not None
+
+    client.fail_next["read_status"] = ProtocolMismatch("PLC restart detected")
+    clock.advance(100)
+    controller.process_once()
+
+    assert not controller.snapshot.connected
+    assert controller._run_session is None
+    assert controller._pending_sync is None
 
 
 def test_definite_pre_start_write_failure_clears_pending_guard() -> None:

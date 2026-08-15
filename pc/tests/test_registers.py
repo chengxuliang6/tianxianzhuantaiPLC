@@ -74,8 +74,9 @@ def test_decode_i32_rejects_malformed_unsigned_16_bit_words(words: tuple[object,
 
 
 def test_register_iteration_contains_only_allocated_modbus_addresses() -> None:
-    assert all(1000 <= address <= 1299 or address == Register.EVENT_BUFFER_BASE for address in Register)
-    assert {6, 360}.isdisjoint(set(Register))
+    assert all(0 <= address <= 206 or address == Register.EVENT_BUFFER_BASE for address in Register)
+    assert not ({*range(1000, 1207)} & {int(address) for address in Register})
+    assert 360 not in set(Register)
 
 
 def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() -> None:
@@ -134,9 +135,9 @@ def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() ->
         Register.TIME_SYNC_RESPONSE_SEQ,
     ]
 
-    assert all(1000 <= address <= 1099 for address in command_addresses)
-    assert all(1100 <= address <= 1199 for address in status_addresses)
-    assert all(1200 <= address <= 1299 for address in protocol_addresses)
+    assert command_addresses == list(range(0, 20))
+    assert status_addresses == list(range(100, 121))
+    assert protocol_addresses == list(range(200, 207))
     assert len(command_addresses + status_addresses + protocol_addresses) == len(
         set(command_addresses + status_addresses + protocol_addresses)
     )
@@ -147,6 +148,6 @@ def test_register_ranges_are_non_overlapping_and_event_buffer_ends_at_d4159() ->
 
 
 def test_run_start_tick_occupies_the_next_two_status_words_without_overlap() -> None:
-    assert Register.RUN_START_TICK_MS_HI == 1119
-    assert Register.RUN_START_TICK_MS_LO == 1120
+    assert Register.RUN_START_TICK_MS_HI == 119
+    assert Register.RUN_START_TICK_MS_LO == 120
     assert Register.RUN_START_TICK_MS_LO < Register.PROTOCOL_VERSION

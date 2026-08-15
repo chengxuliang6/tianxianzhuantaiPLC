@@ -125,7 +125,7 @@ class SimulatedTurntableClient:
                 event_generation=self._event_generation,
                 run_status=self._simulator.run_status,
                 run_start_plc_ms=self._run_start_plc_ms,
-                protocol_version=1,
+                protocol_version=2,
                 word_order_probe=0x12345678,
                 time_sync_request_seq=self._time_sync_request_seq,
                 plc_tick_ms=self._plc_tick_ms(),

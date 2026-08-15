@@ -14,7 +14,16 @@ from typing import Any, Protocol, Sequence
 from pymodbus.client import ModbusTcpClient
 
 from .domain import Direction, Mode, RunState, RunStatus
-from .registers import EVENT_RECORD_COUNT, EVENT_RECORD_WORDS, Register, decode_i32, decode_u32, encode_i32
+from .registers import (
+    EVENT_RECORD_COUNT,
+    EVENT_RECORD_WORDS,
+    PROTOCOL_VERSION,
+    WORD_ORDER_PROBE,
+    Register,
+    decode_i32,
+    decode_u32,
+    encode_i32,
+)
 
 
 class CommunicationError(RuntimeError):
@@ -154,6 +163,7 @@ class TurntableModbusClient:
         self._verified = False
         self._sequences: dict[Register, int] = {}
         self._time_sync_sequence = 0
+        self._last_plc_tick_ms: int | None = None
 
     @property
     def start_command_seq(self) -> int:
@@ -178,11 +188,13 @@ class TurntableModbusClient:
             self._transport_open = True
             try:
                 version = self._read_words(Register.PROTOCOL_VERSION, 1, "protocol version")[0]
-                if version != 1:
-                    raise ProtocolMismatch(f"protocol version at D1200 is {version}, expected 1")
+                if version != PROTOCOL_VERSION:
+                    raise ProtocolMismatch(
+                        f"protocol version at D200 is {version}, expected {PROTOCOL_VERSION}"
+                    )
                 probe = self._read_words(Register.WORD_ORDER_PROBE_HI, 2, "word-order probe")
-                if probe != [0x1234, 0x5678]:
-                    raise ProtocolMismatch("word-order probe at D1201:D1202 is not 0x1234,0x5678")
+                if probe != list(WORD_ORDER_PROBE):
+                    raise ProtocolMismatch("word-order probe at D201:D202 is not 0x1234,0x5678")
                 command_words = self._read_words(Register.START_SEQ, 7, "command sequence words")
                 ack_words = self._read_words(Register.START_ACK_SEQ, 6, "acknowledgement words")
                 self._sequences = {
@@ -228,12 +240,21 @@ class TurntableModbusClient:
             self._require_verified()
             status = self._read_words(Register.RUN_STATE, 21, "status")
             protocol = self._read_words(Register.PROTOCOL_VERSION, 7, "protocol status")
-            if protocol[0] != 1:
+            if protocol[0] != PROTOCOL_VERSION:
                 self._invalidate_session()
-                raise ProtocolMismatch(f"protocol version at D1200 is {protocol[0]}, expected 1")
-            if protocol[1:3] != [0x1234, 0x5678]:
+                raise ProtocolMismatch(
+                    f"protocol version at D200 is {protocol[0]}, expected {PROTOCOL_VERSION}"
+                )
+            if protocol[1:3] != list(WORD_ORDER_PROBE):
                 self._invalidate_session()
-                raise ProtocolMismatch("word-order probe at D1201:D1202 is not 0x1234,0x5678")
+                raise ProtocolMismatch("word-order probe at D201:D202 is not 0x1234,0x5678")
+            plc_tick_ms = _decode_u32(protocol[4:6], "PLC tick")
+            if self._last_plc_tick_ms is not None and (
+                (plc_tick_ms - self._last_plc_tick_ms) & 0xFFFF_FFFF
+            ) >= 0x8000_0000:
+                self._invalidate_session()
+                raise ProtocolMismatch("PLC tick rollback indicates restart")
+            self._last_plc_tick_ms = plc_tick_ms
             return StatusSnapshot(
                 run_state=_enum_or_raw(RunState, status[0]),
                 status_flags=status[1],
@@ -255,7 +276,7 @@ class TurntableModbusClient:
                 protocol_version=protocol[0],
                 word_order_probe=_decode_i32(protocol[1:3], "word-order probe"),
                 time_sync_request_seq=protocol[3],
-                plc_tick_ms=_decode_u32(protocol[4:6], "PLC tick"),
+                plc_tick_ms=plc_tick_ms,
                 time_sync_response_seq=protocol[6],
             )
 
@@ -360,6 +381,7 @@ class TurntableModbusClient:
     def _invalidate_session(self, *, force_close: bool = False) -> None:
         self._verified = False
         self._sequences.clear()
+        self._last_plc_tick_ms = None
         if self._transport_open or force_close:
             try:
                 self._transport.close()

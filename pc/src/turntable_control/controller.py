@@ -1002,6 +1002,7 @@ class TurntableController:
                 pass
 
     def _handle_communication_error(self, error: Exception) -> None:
+        restart_detected = isinstance(error, ProtocolMismatch) and "restart" in str(error).lower()
         try:
             self._client.close()
         except Exception:
@@ -1011,11 +1012,29 @@ class TurntableController:
             self._stop_requested = False
             self._disconnect_requested = False
             self._pending_start = None
+            if restart_detected:
+                self._run_session = None
+                self._issued_start_seq = None
+                self._uncertain_start = None
+                self._start_cancellation = None
+                self._attempted_generations.clear()
+                self._handled_generations.clear()
+                self._generation_test_ids.clear()
+                self._ack_attempts.clear()
+                self._durable_recovery = None
         self._pending_sync = None
         self._observed_start_command_seq = None
         self._next_poll_ms = None
         self._next_heartbeat_ms = None
-        self._publish(replace(self.snapshot, connected=False, last_error=str(error)))
+        self._publish(
+            replace(
+                self.snapshot,
+                connected=False,
+                last_error=str(error),
+                active_test_id=None if restart_detected else self.snapshot.active_test_id,
+                download_pending=False if restart_detected else self.snapshot.download_pending,
+            )
+        )
         with self._lock:
             callbacks = tuple(self._error_callbacks)
         for callback in callbacks:

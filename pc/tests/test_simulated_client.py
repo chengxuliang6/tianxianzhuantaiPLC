@@ -68,7 +68,7 @@ def test_client_lifecycle_commissioning_sequences_and_protocol_snapshot() -> Non
     initial = client.read_status()
     assert initial.run_state is RunState.ZERO_REQUIRED
     assert initial.status_flags & (STATUS_ZERO_VALID | STATUS_POWERED) == 0
-    assert (initial.protocol_version, initial.word_order_probe) == (1, 0x12345678)
+    assert (initial.protocol_version, initial.word_order_probe) == (2, 0x12345678)
 
     assert client.set_zero() == 1
     assert client.toggle_power() == 1

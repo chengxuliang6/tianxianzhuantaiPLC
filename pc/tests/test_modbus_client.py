@@ -23,7 +23,7 @@ class FakeTransport:
 
     def __init__(self) -> None:
         self.memory = [0] * 5000
-        self.memory[Register.PROTOCOL_VERSION] = 1
+        self.memory[Register.PROTOCOL_VERSION] = 2
         self.memory[Register.WORD_ORDER_PROBE_HI] = 0x1234
         self.memory[Register.WORD_ORDER_PROBE_LO] = 0x5678
         self.connected = False
@@ -93,7 +93,7 @@ def test_connect_probes_before_enabling_writes_and_uses_keyword_device_id(fake_t
     client = make_client(fake_transport)
     connect(client)
 
-    assert [call["address"] for call in fake_transport.read_calls[:4]] == [1200, 1201, 1003, 1110]
+    assert [call["address"] for call in fake_transport.read_calls[:4]] == [200, 201, 3, 110]
     assert all(call["device_id"] == 7 for call in fake_transport.read_calls)
     assert fake_transport.write_calls == []
 
@@ -113,7 +113,7 @@ def test_connect_exposes_the_verified_command_side_start_sequence(fake_transport
 
 @pytest.mark.parametrize(
     ("address", "value"),
-    [(Register.PROTOCOL_VERSION, 2), (Register.WORD_ORDER_PROBE_LO, 0x7856)],
+    [(Register.PROTOCOL_VERSION, 1), (Register.WORD_ORDER_PROBE_LO, 0x7856)],
 )
 def test_connect_rejects_protocol_or_word_order_mismatch_without_writes(
     fake_transport: FakeTransport, address: Register, value: int
@@ -173,6 +173,32 @@ def test_status_decodes_signed_values_raw_u32_and_unknown_enums(fake_transport: 
     assert status_reads[-1]["count"] == 21
 
 
+def test_plc_tick_wrap_is_forward_progress(fake_transport: FakeTransport) -> None:
+    client = make_client(fake_transport)
+    connect(client)
+    fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(
+        encode_u32(0xFFFF_FFF0)
+    )
+    assert client.read_status().plc_tick_ms == 0xFFFF_FFF0
+    fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(encode_u32(10))
+    assert client.read_status().plc_tick_ms == 10
+
+
+def test_plc_tick_restart_invalidates_session_before_any_write(fake_transport: FakeTransport) -> None:
+    from turntable_control.modbus_client import ProtocolMismatch
+
+    client = make_client(fake_transport)
+    connect(client)
+    fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(encode_u32(50_000))
+    assert client.read_status().plc_tick_ms == 50_000
+    fake_transport.memory[Register.PLC_TICK_MS_HI : Register.PLC_TICK_MS_LO + 1] = list(encode_u32(10))
+    with pytest.raises(ProtocolMismatch, match="restart"):
+        client.read_status()
+    with pytest.raises(ProtocolMismatch):
+        client.send_stop()
+    assert fake_transport.write_calls == []
+
+
 def test_read_events_chunks_360_records_without_reading_past_fixed_buffer(fake_transport: FakeTransport) -> None:
     client = make_client(fake_transport)
     connect(client)
@@ -230,8 +256,8 @@ def test_start_writes_fixed_parameters_then_settings_then_sequence_and_rejects_i
     connect(client)
 
     client.send_start(Mode.AUTO, Direction.CCW, 5)
-    assert [call["address"] for call in fake_transport.write_calls] == [1010, 1012, 1014, 1016, 1018, 1000, 1001, 1002, 1003]
-    assert fake_transport.write_calls[-1] == {"kind": "single", "address": 1003, "value": 1, "device_id": 7}
+    assert [call["address"] for call in fake_transport.write_calls] == [10, 12, 14, 16, 18, 0, 1, 2, 3]
+    assert fake_transport.write_calls[-1] == {"kind": "single", "address": 3, "value": 1, "device_id": 7}
 
     writes_before = list(fake_transport.write_calls)
     for bad_args in [(0, Direction.CW, 1), (Mode.AUTO, -1, 1), (Mode.AUTO, Direction.CW, 0), (Mode.AUTO, Direction.CW, 6)]:
@@ -260,7 +286,7 @@ def test_stop_is_one_direct_write_despite_unacknowledged_start(fake_transport: F
 
     assert client.send_stop() == 1
     assert fake_transport.write_calls[writes_before_stop:] == [
-        {"kind": "single", "address": 1004, "value": 1, "device_id": 7}
+        {"kind": "single", "address": 4, "value": 1, "device_id": 7}
     ]
 
 
@@ -277,7 +303,7 @@ def test_small_commands_heartbeat_and_time_sync_use_raw_sequences(fake_transport
     client.write_heartbeat(0xFFFF)
     with pytest.raises(ValueError):
         client.write_heartbeat(True)
-    assert fake_transport.write_calls[-1] == {"kind": "single", "address": 1008, "value": 0xFFFF, "device_id": 7}
+    assert fake_transport.write_calls[-1] == {"kind": "single", "address": 8, "value": 0xFFFF, "device_id": 7}
 
 
 def test_close_is_idempotent_and_sequence_increments_are_thread_safe(fake_transport: FakeTransport) -> None:
@@ -412,7 +438,7 @@ def test_verified_read_failures_invalidate_session(fake_transport: FakeTransport
 
 @pytest.mark.parametrize(
     ("address", "value"),
-    [(Register.PROTOCOL_VERSION, 2), (Register.WORD_ORDER_PROBE_HI, 0x3412)],
+    [(Register.PROTOCOL_VERSION, 1), (Register.WORD_ORDER_PROBE_HI, 0x3412)],
 )
 def test_status_rechecks_protocol_probe_and_invalidates_on_mismatch(
     fake_transport: FakeTransport, address: Register, value: int
