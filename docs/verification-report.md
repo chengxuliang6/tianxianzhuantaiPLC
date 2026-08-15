@@ -24,17 +24,19 @@
 
 ## 最新验证证据
 
-最终提交前验证使用项目 `.venv` 的 Python 3.12.13：
+2026-08-15 Task 5 最终交付验证使用项目 `.venv` 的 Python 3.12.13。共享环境的可编辑安装指向另一工作树，因此验证进程仅以 `$env:PYTHONPATH='<项目根目录>\\pc\\src'` 将当前工作树源码置于导入路径首位；未修改依赖、构建脚本或受版本控制的源码：
 
 ```powershell
 $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m pytest pc/tests/test_simulated_client.py pc/tests/test_end_to_end.py -o addopts= -q
 .\.venv\Scripts\python.exe -m pytest pc/tests -o addopts= -q
 .\.venv\Scripts\python.exe -m compileall -q pc/src
+git diff --check
 .\scripts\build-windows.ps1
+& '.\dist\TurntableControl\TurntableControl.exe' --simulator --package-smoke --data-dir '.\data\package-smoke-v2'
 ```
 
-最终结果：Task 9 聚焦测试 `31 passed`；电脑端全量测试 `348 passed`；`compileall`、PowerShell 解析与 `git diff --check` 均通过。
+最终结果：构建前和构建后均完成全量 PC 测试；构建后新鲜运行结果为 `359 passed in 7.11s`。`compileall` 与 `git diff --check` 均以退出码 0 完成；`build-windows.ps1` 输出“构建与无网络启动检查通过”；独立 `--simulator --package-smoke` 以退出码 0 完成。
 
 Windows 构建环境：PyInstaller 6.22.0、Python 3.12.13、Windows 11。输出：
 
@@ -42,7 +44,7 @@ Windows 构建环境：PyInstaller 6.22.0、Python 3.12.13、Windows 11。输出
 
 构建脚本会把当前 Python 的 `DLLs` 目录置于 `PATH` 首位，避免错误收集 Anaconda/Git 的不兼容 OpenSSL；正式包验证为 OpenSSL 3.5.7。构建后以 `--simulator --package-smoke` 启动真实 GUI 路径并在 250 ms 后自动退出，全程无 PLC/网络访问。
 
-最终 EXE 大小为 `2,663,041` 字节，SHA-256 为 `731411974023045BD2B11BB51C095F8B0F8F340C50E987F180C4A5C1FB1574C8`。
+本次重建 EXE 为 `2,663,846` 字节，最后写入时间为 `2026-08-15 15:06:33 +08:00`，SHA-256 为 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF`。
 
 ## 已验证、静态检查与现场待验证
 

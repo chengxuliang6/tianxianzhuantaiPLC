@@ -346,6 +346,13 @@
 - PyInstaller 6.22.0 干净构建和 `--simulator --package-smoke` 自动退出检查通过；正式 EXE 使用 OpenSSL 3.5.7。
 - `TurntableControl.exe`：2,663,041 字节；SHA-256 `731411974023045BD2B11BB51C095F8B0F8F340C50E987F180C4A5C1FB1574C8`。
 
+## Task 5：协议 v2 Windows 交付重建与最终验证（2026-08-15）
+
+- 在无 PLC、网络、AutoShop、伺服或转台硬件访问的本地 offscreen 环境中，重建 `dist\TurntableControl\TurntableControl.exe`。为复用指定工作树的现有 Python 环境，创建了被 Git 忽略的 `.venv` 目录联接；验证进程以当前 `pc\src` 作为导入路径首位，未修改依赖、构建脚本或协议源码。
+- 新鲜全量 PC 测试在构建前与构建后均完成；构建后结果为 `359 passed in 7.11s`。`compileall -q pc/src`、`git diff --check`、`scripts\build-windows.ps1` 以及独立 `--simulator --package-smoke --data-dir .\data\package-smoke-v2` 都以退出码 0 完成。构建脚本输出“构建与无网络启动检查通过”。
+- 重建 EXE 位于 `dist\TurntableControl\TurntableControl.exe`，大小 `2,663,846` 字节，最后写入时间 `2026-08-15 15:06:33 +08:00`，SHA-256 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF`。`dist/` 保持 Git 忽略，未作为交付证据提交。
+- 对 `pc/src`、`plc`、`README.md` 和 `docs` 进行了旧 v1 地址扫描。仅命中本日志中已经明确标注为历史迁移记录的条目，以及 `plc/register-map.md` 的废弃 v1 映射说明；未发现当前协议 v2 合同依赖。
+
 ## Task 10 准备：现场 PLC 与安全联调
 
 - 已生成现场清单，按不上电机械检查、AutoShop 离线编译、指定 PLC 的只读网络/字序检查、下载授权、空载 1°/s 极小位移、心跳停止和禁止高速度/整圈/带载门禁排序。
