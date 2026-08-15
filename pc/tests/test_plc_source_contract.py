@@ -229,3 +229,25 @@ def test_reference_texts_are_litest_sized_and_avoid_dynamic_allocation() -> None
         assert len(text.splitlines()) < 1000, path
         assert "malloc" not in text.lower()
         assert "new " not in text.lower()
+
+
+def test_delivery_docs_state_only_the_protocol_v2_commissioning_contract() -> None:
+    docs = {
+        path: path.read_text(encoding="utf-8")
+        for path in (
+            ROOT / "README.md",
+            ROOT / "docs" / "AI_HANDOFF.md",
+            ROOT / "docs" / "on-site-commissioning-checklist.md",
+            ROOT / "docs" / "verification-report.md",
+            ROOT / "docs" / "delivery-manifest.md",
+        )
+    }
+    checklist = docs[ROOT / "docs" / "on-site-commissioning-checklist.md"]
+    for token in ("D0:D19", "D100:D120", "D200:D206", "D2000:D4159", "协议版本 `2`", "D200:D202", "0x1234", "0x5678", "反转=-1"):
+        assert token in checklist
+    assert "重启后旧事件字无效" in checklist
+
+    obsolete_current_contracts = ("D1000", "D1100", "D1200", "D1201:D1202", "协议版本 `1`")
+    for path, text in docs.items():
+        for obsolete in obsolete_current_contracts:
+            assert obsolete not in text, f"{path}: {obsolete} is not a current v2 contract"
