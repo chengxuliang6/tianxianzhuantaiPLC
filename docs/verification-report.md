@@ -1,6 +1,6 @@
 # 天线测试转台软件验证报告
 
-日期：2026-08-13
+日期：2026-08-15
 范围：Task 1～9 的本地软件、PLC 参考源码静态契约、模拟端到端流程与 Windows 打包。
 设备访问：本报告中的验证未连接网络、PLC、AutoShop、伺服或转台硬件。
 
@@ -24,10 +24,11 @@
 
 ## 最新验证证据
 
-2026-08-15 Task 5 最终交付验证使用项目 `.venv` 的 Python 3.12.13。共享环境的可编辑安装指向另一工作树，因此验证进程仅以 `$env:PYTHONPATH='<项目根目录>\\pc\\src'` 将当前工作树源码置于导入路径首位；未修改依赖、构建脚本或受版本控制的源码：
+2026-08-15 Task 5 最终交付验证使用项目 `.venv` 的 Python 3.12.13。共享环境的可编辑安装指向另一工作树，因此验证进程以当前工作树的 `pc\\src` 置于导入路径首位；未修改依赖、构建脚本或受版本控制的源码：
 
 ```powershell
 $env:QT_QPA_PLATFORM='offscreen'
+$env:PYTHONPATH=(Resolve-Path '.\pc\src').Path
 .\.venv\Scripts\python.exe -m pytest pc/tests/test_simulated_client.py pc/tests/test_end_to_end.py -o addopts= -q
 .\.venv\Scripts\python.exe -m pytest pc/tests -o addopts= -q
 .\.venv\Scripts\python.exe -m compileall -q pc/src
@@ -40,7 +41,7 @@ git diff --check
 
 Windows 构建环境：PyInstaller 6.22.0、Python 3.12.13、Windows 11。输出：
 
-`F:\Codex_PRJ\天线平台旋转装置\.worktrees\turntable-control\dist\TurntableControl\TurntableControl.exe`
+`dist\TurntableControl\TurntableControl.exe`
 
 构建脚本会把当前 Python 的 `DLLs` 目录置于 `PATH` 首位，避免错误收集 Anaconda/Git 的不兼容 OpenSSL；正式包验证为 OpenSSL 3.5.7。构建后以 `--simulator --package-smoke` 启动真实 GUI 路径并在 250 ms 后自动退出，全程无 PLC/网络访问。
 
