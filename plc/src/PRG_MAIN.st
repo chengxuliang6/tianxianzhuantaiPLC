@@ -37,13 +37,13 @@ END_VAR
 (* PRG_MAIN must be scheduled as a constant 1 ms task; tick is not retained. *)
 udiPlcTickMs := udiPlcTickMs + 1;
 
-(* Decode all runtime parameters explicitly. D1010 ratio must match the
+(* Decode all runtime parameters explicitly. D0010 ratio must match the
    offline Axis_0 scaling; phase 1 does not perform backlash compensation. *)
-diTotalRatioMilli := FC_DecodeI32(iHighWord := iD1010RatioHi, iLowWord := iD1011RatioLo);
-diRequestedAccelMilli := FC_DecodeI32(iHighWord := iD1012AccelHi, iLowWord := iD1013AccelLo);
-diRequestedDecelMilli := FC_DecodeI32(iHighWord := iD1014DecelHi, iLowWord := iD1015DecelLo);
-diRequestedStopDecelMilli := FC_DecodeI32(iHighWord := iD1016StopDecelHi, iLowWord := iD1017StopDecelLo);
-diBacklashMilli := FC_DecodeI32(iHighWord := iD1018BacklashHi, iLowWord := iD1019BacklashLo);
+diTotalRatioMilli := FC_DecodeI32(iHighWord := iD0010RatioHi, iLowWord := iD0011RatioLo);
+diRequestedAccelMilli := FC_DecodeI32(iHighWord := iD0012AccelHi, iLowWord := iD0013AccelLo);
+diRequestedDecelMilli := FC_DecodeI32(iHighWord := iD0014DecelHi, iLowWord := iD0015DecelLo);
+diRequestedStopDecelMilli := FC_DecodeI32(iHighWord := iD0016StopDecelHi, iLowWord := iD0017StopDecelLo);
+diBacklashMilli := FC_DecodeI32(iHighWord := iD0018BacklashHi, iLowWord := iD0019BacklashLo);
 
 (* 1. Refresh feedback first. These enables remain TRUE for continuously valid reads. *)
 MC_ReadActualPosition(Enable := TRUE, Axis := Axis_0,
@@ -63,11 +63,11 @@ END_IF;
 
 (* 2. Deterministic command/state decision uses current feedback and raw INT wire words. *)
 fbControl(
-    uiMode := UINT(iD1000Mode), iDirection := iD1001Direction,
-    uiSpeedIndex := UINT(iD1002SpeedIndex), uiStartSeq := UINT(iD1003StartSeq),
-    uiStopSeq := UINT(iD1004StopSeq), uiSetZeroSeq := UINT(iD1005SetZeroSeq),
-    uiResetFaultSeq := UINT(iD1006ResetFaultSeq), uiPowerSeq := UINT(iD1007PowerSeq),
-    uiHeartbeat := UINT(iD1008Heartbeat), uiBufferAckSeq := UINT(iD1009BufferAckSeq),
+    uiMode := UINT(iD0000Mode), iDirection := iD0001Direction,
+    uiSpeedIndex := UINT(iD0002SpeedIndex), uiStartSeq := UINT(iD0003StartSeq),
+    uiStopSeq := UINT(iD0004StopSeq), uiSetZeroSeq := UINT(iD0005SetZeroSeq),
+    uiResetFaultSeq := UINT(iD0006ResetFaultSeq), uiPowerSeq := UINT(iD0007PowerSeq),
+    uiHeartbeat := UINT(iD0008Heartbeat), uiBufferAckSeq := UINT(iD0009BufferAckSeq),
     udiNowTickMs := udiPlcTickMs,
     diTotalRatioMilli := diTotalRatioMilli, diRequestedAccelMilli := diRequestedAccelMilli,
     diRequestedDecelMilli := diRequestedDecelMilli, diRequestedStopDecelMilli := diRequestedStopDecelMilli,
@@ -140,22 +140,22 @@ IF bPositionValid AND NOT bPositionError THEN
     rPreviousPosition := rLoggerPosition;
 END_IF;
 
-iD1100RunState := INT(fbControl.uiRunState); iD1101StatusFlags := INT(fbControl.uiStatusFlags);
-iD1102FaultCode := INT(fbControl.uiFaultCode); iD1109HeartbeatEcho := INT(fbControl.uiHeartbeatEcho);
-iD1110StartAck := INT(fbControl.uiStartAckSeq); iD1111StopAck := INT(fbControl.uiStopAckSeq);
-iD1112SetZeroAck := INT(fbControl.uiSetZeroAckSeq); iD1113ResetFaultAck := INT(fbControl.uiResetFaultAckSeq);
-iD1114PowerAck := INT(fbControl.uiPowerAckSeq); iD1115BufferAcked := INT(fbControl.uiBufferAckedSeq);
-iD1116EventCount := INT(uiLoggerEventCount); iD1117Generation := INT(uiLoggerGeneration);
-iD1118RunStatus := INT(fbControl.uiRunStatus); iD1200ProtocolVersion := INT(PROTOCOL_VERSION);
-iD1201WordOrderHi := WORD_ORDER_PROBE_HIGH; iD1202WordOrderLo := WORD_ORDER_PROBE_LOW;
-iD1206TimeSyncResponse := iD1203TimeSyncRequest;
+iD0100RunState := INT(fbControl.uiRunState); iD0101StatusFlags := INT(fbControl.uiStatusFlags);
+iD0102FaultCode := INT(fbControl.uiFaultCode); iD0109HeartbeatEcho := INT(fbControl.uiHeartbeatEcho);
+iD0110StartAck := INT(fbControl.uiStartAckSeq); iD0111StopAck := INT(fbControl.uiStopAckSeq);
+iD0112SetZeroAck := INT(fbControl.uiSetZeroAckSeq); iD0113ResetFaultAck := INT(fbControl.uiResetFaultAckSeq);
+iD0114PowerAck := INT(fbControl.uiPowerAckSeq); iD0115BufferAcked := INT(fbControl.uiBufferAckedSeq);
+iD0116EventCount := INT(uiLoggerEventCount); iD0117Generation := INT(uiLoggerGeneration);
+iD0118RunStatus := INT(fbControl.uiRunStatus); iD0200ProtocolVersion := INT(PROTOCOL_VERSION);
+iD0201WordOrderHi := WORD_ORDER_PROBE_HIGH; iD0202WordOrderLo := WORD_ORDER_PROBE_LOW;
+iD0206TimeSyncResponse := iD0203TimeSyncRequest;
 
 diPositionMdeg := REAL_TO_DINT(rActualPosition * 1000.0);
 diTargetMdeg := REAL_TO_DINT(fbControl.rAcceptedTargetDeg * 1000.0);
 diVelocityMdegS := REAL_TO_DINT(rActualVelocity * 1000.0);
-FC_SplitI32(diValue := diPositionMdeg, iHighWord => iD1103PositionHi, iLowWord => iD1104PositionLo);
-FC_SplitI32(diValue := diTargetMdeg, iHighWord => iD1105TargetHi, iLowWord => iD1106TargetLo);
-FC_SplitI32(diValue := diVelocityMdegS, iHighWord => iD1107VelocityHi, iLowWord => iD1108VelocityLo);
-FC_SplitU32(udiValue := fbControl.udiRunStartTickMs, iHighWord => iD1119RunStartTickHi, iLowWord => iD1120RunStartTickLo);
-FC_SplitU32(udiValue := udiPlcTickMs, iHighWord => iD1204TickHi, iLowWord => iD1205TickLo);
+FC_SplitI32(diValue := diPositionMdeg, iHighWord => iD0103PositionHi, iLowWord => iD0104PositionLo);
+FC_SplitI32(diValue := diTargetMdeg, iHighWord => iD0105TargetHi, iLowWord => iD0106TargetLo);
+FC_SplitI32(diValue := diVelocityMdegS, iHighWord => iD0107VelocityHi, iLowWord => iD0108VelocityLo);
+FC_SplitU32(udiValue := fbControl.udiRunStartTickMs, iHighWord => iD0119RunStartTickHi, iLowWord => iD0120RunStartTickLo);
+FC_SplitU32(udiValue := udiPlcTickMs, iHighWord => iD0204TickHi, iLowWord => iD0205TickLo);
 END_PROGRAM

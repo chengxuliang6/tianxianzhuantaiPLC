@@ -80,8 +80,8 @@ def test_start_has_a_terminal_ack_freshness_and_latched_parameter_path() -> None
     assert "(uiHeartbeatAgeScans > 1000)" in controller
     assert "OR bUnsafeStopFailure" in controller
     assert "diRequestedAccelMilli" in controller and "diBacklashMilli <> 0" in controller
-    assert "FC_DecodeI32(iHighWord := iD1012AccelHi" in main
-    assert "FC_DecodeI32(iHighWord := iD1018BacklashHi" in main
+    assert "FC_DecodeI32(iHighWord := iD0012AccelHi" in main
+    assert "FC_DecodeI32(iHighWord := iD0018BacklashHi" in main
 
 
 def test_readme_documents_u32_reset_and_unsafe_stop_response() -> None:
@@ -116,8 +116,8 @@ def test_stop_error_releases_execute_and_reset_start_clear_fault_latches() -> No
 def test_modbus_words_are_globally_declared_once_not_locally_redeclared() -> None:
     constants = source("Turntable_Constants.st")
     main = source("PRG_MAIN.st")
-    assert "VAR_GLOBAL" in constants and "iD1000Mode" in constants and "aD2000Events" in constants
-    assert "iD1000Mode," not in main
+    assert "VAR_GLOBAL" in constants and "iD0000Mode" in constants and "aD2000Events" in constants
+    assert "iD0000Mode," not in main
 
 
 def test_no_immediate_stop_is_called_or_claimed() -> None:
@@ -128,12 +128,12 @@ def test_no_immediate_stop_is_called_or_claimed() -> None:
 
 def test_constants_cover_register_contract_motion_contract_and_event_extent() -> None:
     constants = source("Turntable_Constants.st")
-    for register in range(1000, 1020):
-        assert f"D{register}" in constants
-    for register in range(1100, 1121):
-        assert f"D{register}" in constants
-    for register in range(1200, 1207):
-        assert f"D{register}" in constants
+    for register in range(0, 20):
+        assert f"D{register:04d}" in constants
+    for register in range(100, 121):
+        assert f"D{register:04d}" in constants
+    for register in range(200, 207):
+        assert f"D{register:04d}" in constants
     for token in ("16#1234", "16#5678", "360", "6", "D4159", "50000", "5000", "10000", "-360.0", "360.0", "1.0", "2.0", "4.0", "5.0", "10.0", "DIRECTION_CW", "DIRECTION_CCW"):
         assert token in constants
 
@@ -144,19 +144,19 @@ def test_plc_publishes_latched_run_start_tick_as_high_word_first_u32() -> None:
     readme = (PLC / "README.md").read_text(encoding="utf-8")
 
     for token in (
-        "D1119_RUN_START_TICK_HI",
-        "D1120_RUN_START_TICK_LO",
-        "iD1119RunStartTickHi",
-        "iD1120RunStartTickLo",
+        "D0119_RUN_START_TICK_HI",
+        "D0120_RUN_START_TICK_LO",
+        "iD0119RunStartTickHi",
+        "iD0120RunStartTickLo",
     ):
         assert token in constants
     assert re.search(
         r"FC_SplitU32\(udiValue\s*:=\s*fbControl\.udiRunStartTickMs,\s*"
-        r"iHighWord\s*=>\s*iD1119RunStartTickHi,\s*"
-        r"iLowWord\s*=>\s*iD1120RunStartTickLo\)",
+        r"iHighWord\s*=>\s*iD0119RunStartTickHi,\s*"
+        r"iLowWord\s*=>\s*iD0120RunStartTickLo\)",
         main,
     )
-    assert "D1119:D1120" in readme
+    assert "D0119:D0120" in readme
     assert "RUN_START_TICK_MS" in readme
 
 
@@ -168,8 +168,41 @@ def test_degree_logger_is_bounded_writes_six_words_and_preserves_unacked_buffer(
 
 def test_readme_covers_binding_configuration_safety_and_resource_limits() -> None:
     readme = (PLC / "README.md").read_text(encoding="utf-8")
-    for token in ("D1000", "D1206", "D2000", "D4159", "INT", "PDO", "6040h", "607Ah", "6081h", "6083h", "6084h", "6060h", "6041h", "6064h", "6061h", "Axis_0", "linear", "degrees", "50:1", "23-bit", "EtherCAT", "1 ms", "MAIN", "9116", "Modbus TCP", "EtherNET1", "CN3", "Type-C", "physical emergency stop", "unloaded", "1 degrees/s", "resolution", "49.7", "compiler", "resource"):
+    for token in ("D0000", "D0206", "D2000", "D4159", "INT", "PDO", "6040h", "607Ah", "6081h", "6083h", "6084h", "6060h", "6041h", "6064h", "6061h", "Axis_0", "linear", "degrees", "50:1", "23-bit", "EtherCAT", "1 ms", "MAIN", "9116", "Modbus TCP", "EtherNET1", "CN3", "Type-C", "physical emergency stop", "unloaded", "1 degrees/s", "resolution", "49.7", "compiler", "resource"):
         assert token in readme
+
+
+def test_plc_reference_uses_only_protocol_v2_variable_names() -> None:
+    constants = source("Turntable_Constants.st")
+    active_sources = "\n".join(
+        source(name) for name in ("Turntable_Constants.st", "PRG_MAIN.st")
+    )
+    expected = [
+        *(f"iD{address:04d}{suffix}" for address, suffix in (
+            (0, "Mode"), (1, "Direction"), (2, "SpeedIndex"), (3, "StartSeq"),
+            (4, "StopSeq"), (5, "SetZeroSeq"), (6, "ResetFaultSeq"), (7, "PowerSeq"),
+            (8, "Heartbeat"), (9, "BufferAckSeq"), (10, "RatioHi"), (11, "RatioLo"),
+            (12, "AccelHi"), (13, "AccelLo"), (14, "DecelHi"), (15, "DecelLo"),
+            (16, "StopDecelHi"), (17, "StopDecelLo"), (18, "BacklashHi"), (19, "BacklashLo"),
+        )),
+        *(f"iD{address:04d}{suffix}" for address, suffix in (
+            (100, "RunState"), (101, "StatusFlags"), (102, "FaultCode"), (103, "PositionHi"),
+            (104, "PositionLo"), (105, "TargetHi"), (106, "TargetLo"), (107, "VelocityHi"),
+            (108, "VelocityLo"), (109, "HeartbeatEcho"), (110, "StartAck"), (111, "StopAck"),
+            (112, "SetZeroAck"), (113, "ResetFaultAck"), (114, "PowerAck"), (115, "BufferAcked"),
+            (116, "EventCount"), (117, "Generation"), (118, "RunStatus"), (119, "RunStartTickHi"),
+            (120, "RunStartTickLo"),
+        )),
+        *(f"iD{address:04d}{suffix}" for address, suffix in (
+            (200, "ProtocolVersion"), (201, "WordOrderHi"), (202, "WordOrderLo"),
+            (203, "TimeSyncRequest"), (204, "TickHi"), (205, "TickLo"), (206, "TimeSyncResponse"),
+        )),
+        "aD2000Events",
+    ]
+    for name in expected:
+        assert name in constants
+    assert re.search(r"PROTOCOL_VERSION\s*:\s*UINT\s*:=\s*2\s*;", constants)
+    assert not re.search(r"\biD(?:100\d|101\d|110\d|111\d|1120|120\d)\w*\b", active_sources)
 
 
 def test_reference_texts_are_litest_sized_and_avoid_dynamic_allocation() -> None:

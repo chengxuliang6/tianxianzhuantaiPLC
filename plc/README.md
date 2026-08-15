@@ -11,7 +11,7 @@ then compile offline to zero errors before considering a download.
 register below is one `INT`; do not bind a `DINT` or `REAL` directly to D words.
 Use `FC_DecodeI32`/`FC_SplitI32` for high-word-first signed 32-bit values and
 `FC_SplitU32` for raw unsigned tick values. Read
-and verify the D1201/D1202 `0x1234`/`0x5678` word-order probe before any hardware
+and verify the D0201/D0202 `0x1234`/`0x5678` word-order probe before any hardware
 write. If it differs, stop and correct the single PC codec and this contract.
 
 ## Variable table: MODBUS_D
@@ -19,66 +19,68 @@ write. If it differs, stop and correct the single PC codec and this contract.
 Create one **global** variable table named `MODBUS_D` by pasting the `VAR_GLOBAL`
 section in `Turntable_Constants.st`. In its AutoShop address column bind one
 `INT` to each address exactly as listed. Do not redeclare these names in
-`PRG_MAIN`. `NR` means non-retained and `R`
-means retained; all Modbus wire words are `NR` so a restart never replays a
-command. Initial values are bit patterns where `16#` notation is shown.
+`PRG_MAIN`. Set every scalar wire word to AutoShop **non-retained / private**
+so a restart never replays a command. Set the event array to **retained /
+private** so a completed buffer survives a restart. Initial values are bit
+patterns where `16#` notation is shown.
 
-| Address | Variable | Type | Policy | Initial | Description |
+| Address | Variable | Type | AutoShop property | Initial | Description |
 |---|---|---|---|---|---|
-| D1000 | iD1000Mode | INT | NR | 0 | MODE: 0 manual, 1 automatic |
-| D1001 | iD1001Direction | INT | NR | 1 | DIRECTION: +1 CW, -1 CCW |
-| D1002 | iD1002SpeedIndex | INT | NR | 1 | fixed speed index 1..5 |
-| D1003 | iD1003StartSeq | INT | NR | 0 | START_SEQ bit pattern |
-| D1004 | iD1004StopSeq | INT | NR | 0 | STOP_SEQ bit pattern, highest priority |
-| D1005 | iD1005SetZeroSeq | INT | NR | 0 | SET_ZERO_SEQ bit pattern |
-| D1006 | iD1006ResetFaultSeq | INT | NR | 0 | RESET_FAULT_SEQ bit pattern |
-| D1007 | iD1007PowerSeq | INT | NR | 0 | POWER_SEQ bit pattern |
-| D1008 | iD1008Heartbeat | INT | NR | 0 | HEARTBEAT bit pattern |
-| D1009 | iD1009BufferAckSeq | INT | NR | 0 | BUFFER_ACK_SEQ bit pattern |
-| D1010 | iD1010RatioHi | INT | NR | 0 | TOTAL_RATIO high word |
-| D1011 | iD1011RatioLo | INT | NR | 16#C350 | TOTAL_RATIO low word, 50000 milli |
-| D1012 | iD1012AccelHi | INT | NR | 0 | ACCELERATION high word |
-| D1013 | iD1013AccelLo | INT | NR | 5000 | ACCELERATION low word, 5.000 deg/s2 |
-| D1014 | iD1014DecelHi | INT | NR | 0 | DECELERATION high word |
-| D1015 | iD1015DecelLo | INT | NR | 5000 | DECELERATION low word, 5.000 deg/s2 |
-| D1016 | iD1016StopDecelHi | INT | NR | 0 | STOP DECELERATION high word |
-| D1017 | iD1017StopDecelLo | INT | NR | 10000 | STOP DECELERATION low word, 10.000 deg/s2 |
-| D1018 | iD1018BacklashHi | INT | NR | 0 | BACKLASH high word |
-| D1019 | iD1019BacklashLo | INT | NR | 0 | BACKLASH low word |
-| D1100 | iD1100RunState | INT | NR | 0 | PLC run state |
-| D1101 | iD1101StatusFlags | INT | NR | 0 | zero/power/limit/buffer/heartbeat flags |
-| D1102 | iD1102FaultCode | INT | NR | 0 | PLC fault code |
-| D1103 | iD1103PositionHi | INT | NR | 0 | ACTUAL_POSITION high word |
-| D1104 | iD1104PositionLo | INT | NR | 0 | ACTUAL_POSITION low word |
-| D1105 | iD1105TargetHi | INT | NR | 0 | TARGET_POSITION high word |
-| D1106 | iD1106TargetLo | INT | NR | 0 | TARGET_POSITION low word |
-| D1107 | iD1107VelocityHi | INT | NR | 0 | ACTUAL_VELOCITY high word |
-| D1108 | iD1108VelocityLo | INT | NR | 0 | ACTUAL_VELOCITY low word |
-| D1109 | iD1109HeartbeatEcho | INT | NR | 0 | accepted HEARTBEAT |
-| D1110 | iD1110StartAck | INT | NR | 0 | START_ACK_SEQ |
-| D1111 | iD1111StopAck | INT | NR | 0 | STOP_ACK_SEQ |
-| D1112 | iD1112SetZeroAck | INT | NR | 0 | SET_ZERO_ACK_SEQ |
-| D1113 | iD1113ResetFaultAck | INT | NR | 0 | RESET_FAULT_ACK_SEQ |
-| D1114 | iD1114PowerAck | INT | NR | 0 | POWER_ACK_SEQ |
-| D1115 | iD1115BufferAcked | INT | NR | 0 | BUFFER_ACKED_SEQ |
-| D1116 | iD1116EventCount | INT | NR | 0 | buffered event count, maximum 360 |
-| D1117 | iD1117Generation | INT | NR | 0 | event-buffer generation |
-| D1118 | iD1118RunStatus | INT | NR | 0 | final/current run status |
-| D1119 | iD1119RunStartTickHi | INT | NR | 0 | RUN_START_TICK_MS raw u32 high word |
-| D1120 | iD1120RunStartTickLo | INT | NR | 0 | RUN_START_TICK_MS raw u32 low word |
-| D1200 | iD1200ProtocolVersion | INT | NR | 1 | protocol version 1, PLC writes |
-| D1201 | iD1201WordOrderHi | INT | NR | 16#1234 | word-order probe high word |
-| D1202 | iD1202WordOrderLo | INT | NR | 16#5678 | word-order probe low word |
-| D1203 | iD1203TimeSyncRequest | INT | NR | 0 | PC time-sync request sequence |
-| D1204 | iD1204TickHi | INT | NR | 0 | PLC_TICK_MS raw u32 high word |
-| D1205 | iD1205TickLo | INT | NR | 0 | PLC_TICK_MS raw u32 low word |
-| D1206 | iD1206TimeSyncResponse | INT | NR | 0 | echoed time-sync response sequence |
-| D2000:D4159 | aD2000Events[0..2159] | ARRAY[0..2159] OF INT | NR | 0 | 360 records * 6 words, contiguous event array |
+| D0000 | iD0000Mode | INT | non-retained / private | 0 | MODE: 0 manual, 1 automatic |
+| D0001 | iD0001Direction | INT | non-retained / private | 1 | DIRECTION: +1 CW, -1 CCW |
+| D0002 | iD0002SpeedIndex | INT | non-retained / private | 1 | fixed speed index 1..5 |
+| D0003 | iD0003StartSeq | INT | non-retained / private | 0 | START_SEQ bit pattern |
+| D0004 | iD0004StopSeq | INT | non-retained / private | 0 | STOP_SEQ bit pattern, highest priority |
+| D0005 | iD0005SetZeroSeq | INT | non-retained / private | 0 | SET_ZERO_SEQ bit pattern |
+| D0006 | iD0006ResetFaultSeq | INT | non-retained / private | 0 | RESET_FAULT_SEQ bit pattern |
+| D0007 | iD0007PowerSeq | INT | non-retained / private | 0 | POWER_SEQ bit pattern |
+| D0008 | iD0008Heartbeat | INT | non-retained / private | 0 | HEARTBEAT bit pattern |
+| D0009 | iD0009BufferAckSeq | INT | non-retained / private | 0 | BUFFER_ACK_SEQ bit pattern |
+| D0010 | iD0010RatioHi | INT | non-retained / private | 0 | TOTAL_RATIO high word |
+| D0011 | iD0011RatioLo | INT | non-retained / private | 16#C350 | TOTAL_RATIO low word, 50000 milli |
+| D0012 | iD0012AccelHi | INT | non-retained / private | 0 | ACCELERATION high word |
+| D0013 | iD0013AccelLo | INT | non-retained / private | 5000 | ACCELERATION low word, 5.000 deg/s2 |
+| D0014 | iD0014DecelHi | INT | non-retained / private | 0 | DECELERATION high word |
+| D0015 | iD0015DecelLo | INT | non-retained / private | 5000 | DECELERATION low word, 5.000 deg/s2 |
+| D0016 | iD0016StopDecelHi | INT | non-retained / private | 0 | STOP DECELERATION high word |
+| D0017 | iD0017StopDecelLo | INT | non-retained / private | 10000 | STOP DECELERATION low word, 10.000 deg/s2 |
+| D0018 | iD0018BacklashHi | INT | non-retained / private | 0 | BACKLASH high word |
+| D0019 | iD0019BacklashLo | INT | non-retained / private | 0 | BACKLASH low word |
+| D0100 | iD0100RunState | INT | non-retained / private | 0 | PLC run state |
+| D0101 | iD0101StatusFlags | INT | non-retained / private | 0 | zero/power/limit/buffer/heartbeat flags |
+| D0102 | iD0102FaultCode | INT | non-retained / private | 0 | PLC fault code |
+| D0103 | iD0103PositionHi | INT | non-retained / private | 0 | ACTUAL_POSITION high word |
+| D0104 | iD0104PositionLo | INT | non-retained / private | 0 | ACTUAL_POSITION low word |
+| D0105 | iD0105TargetHi | INT | non-retained / private | 0 | TARGET_POSITION high word |
+| D0106 | iD0106TargetLo | INT | non-retained / private | 0 | TARGET_POSITION low word |
+| D0107 | iD0107VelocityHi | INT | non-retained / private | 0 | ACTUAL_VELOCITY high word |
+| D0108 | iD0108VelocityLo | INT | non-retained / private | 0 | ACTUAL_VELOCITY low word |
+| D0109 | iD0109HeartbeatEcho | INT | non-retained / private | 0 | accepted HEARTBEAT |
+| D0110 | iD0110StartAck | INT | non-retained / private | 0 | START_ACK_SEQ |
+| D0111 | iD0111StopAck | INT | non-retained / private | 0 | STOP_ACK_SEQ |
+| D0112 | iD0112SetZeroAck | INT | non-retained / private | 0 | SET_ZERO_ACK_SEQ |
+| D0113 | iD0113ResetFaultAck | INT | non-retained / private | 0 | RESET_FAULT_ACK_SEQ |
+| D0114 | iD0114PowerAck | INT | non-retained / private | 0 | POWER_ACK_SEQ |
+| D0115 | iD0115BufferAcked | INT | non-retained / private | 0 | BUFFER_ACKED_SEQ |
+| D0116 | iD0116EventCount | INT | non-retained / private | 0 | buffered event count, maximum 360 |
+| D0117 | iD0117Generation | INT | non-retained / private | 0 | event-buffer generation |
+| D0118 | iD0118RunStatus | INT | non-retained / private | 0 | final/current run status |
+| D0119 | iD0119RunStartTickHi | INT | non-retained / private | 0 | RUN_START_TICK_MS raw u32 high word |
+| D0120 | iD0120RunStartTickLo | INT | non-retained / private | 0 | RUN_START_TICK_MS raw u32 low word |
+| D0200 | iD0200ProtocolVersion | INT | non-retained / private | 2 | protocol version 2, PLC writes |
+| D0201 | iD0201WordOrderHi | INT | non-retained / private | 16#1234 | word-order probe high word |
+| D0202 | iD0202WordOrderLo | INT | non-retained / private | 16#5678 | word-order probe low word |
+| D0203 | iD0203TimeSyncRequest | INT | non-retained / private | 0 | PC time-sync request sequence |
+| D0204 | iD0204TickHi | INT | non-retained / private | 0 | PLC_TICK_MS raw u32 high word |
+| D0205 | iD0205TickLo | INT | non-retained / private | 0 | PLC_TICK_MS raw u32 low word |
+| D0206 | iD0206TimeSyncResponse | INT | non-retained / private | 0 | echoed time-sync response sequence |
+| D2000:D4159 | aD2000Events[0..2159] | ARRAY[0..2159] OF INT | retained / private | 0 | 2160 INT words: 360 records * 6 contiguous words |
 
-The retained items are deliberately **unbound**: `bZeroValid` and the retained
-stop reason in `FB_TurntableControl`. Mark those FB retained variables `R` in
-the POU variable editor if AutoShop requires an explicit retention flag. They
-are not wire registers. Define only `udiPlcTickMs`, PLCopen feedback/command
+The retained internal items are deliberately **unbound**: `bZeroValid` and the
+retained stop reason in `FB_TurntableControl`. Mark those FB retained variables
+`R` in the POU variable editor if AutoShop requires an explicit retention flag.
+They are not wire registers; `aD2000Events` is the retained/private bound event
+array. Define only `udiPlcTickMs`, PLCopen feedback/command
 variables, decoded internal parameters, and the two FB instances in the
 `PRG_MAIN` POU variable editor; do not define another MODBUS_D table there. A
 buffer is sealed after a run and is released only by
@@ -175,11 +177,11 @@ resume or acknowledge data until the cause and safe standstill are verified.
 `RESET_FAULT_SEQ` starts `MC_Reset`; it is intentionally accepted even for an
 axis/motion error while no run is active. `RESET_FAULT_ACK_SEQ` changes only
 after the instruction returns Done or Error. This is not a substitute for a
-physical emergency stop. D1012:D1017 are decoded as signed milli-degrees/s2,
+physical emergency stop. D0012:D0017 are decoded as signed milli-degrees/s2,
 must be positive, and are latched only when a run is accepted; writes during a
-run do not change it. D1010 must equal the documented 50000 milli ratio and
+run do not change it. D0010 must equal the documented 50000 milli ratio and
 match offline `Axis_0` scaling; phase 1 uses that as a configuration consistency
-check, not a runtime scaling change. D1018 backlash must be zero or start is
+check, not a runtime scaling change. D0018 backlash must be zero or start is
 rejected, because phase 1 has no verified compensation algorithm.
 
 ## Bounded resource and timing summary
@@ -194,8 +196,8 @@ rejected, because phase 1 has no verified compensation algorithm.
   during commissioning and treat a scan overrun as a commissioning failure.
 - Keep task/FB nesting shallow: one 1 ms `PRG_MAIN` task with two FB calls and
   two codec FCs. Check scan-overrun/jitter with AutoShop commissioning tools.
-- The unsigned 32-bit tick wraps after about 49.7 days. D1119:D1120
-  `RUN_START_TICK_MS`, D1204:D1205, and event elapsed words are raw
+- The unsigned 32-bit tick wraps after about 49.7 days. D0119:D0120
+  `RUN_START_TICK_MS`, D0204:D0205, and event elapsed words are raw
   high-word-first u32 bit patterns; the PC must use
   `decode_u32`, not `decode_i32`, so values past 24.85 days do not become
   negative. Unsigned subtraction preserves elapsed time across one wrap; it is
