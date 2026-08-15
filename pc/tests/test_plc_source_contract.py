@@ -172,6 +172,23 @@ def test_readme_covers_binding_configuration_safety_and_resource_limits() -> Non
         assert token in readme
 
 
+def test_docs_invalidate_persisted_event_words_after_restart_and_lock_properties() -> None:
+    readme = " ".join((PLC / "README.md").read_text(encoding="utf-8").split())
+    register_map = " ".join((PLC / "register-map.md").read_text(encoding="utf-8").split())
+    restart_rule = (
+        "After a PLC restart, raw D2000:D4159 words may persist, but D116 EVENT_COUNT, "
+        "D117 EVENT_GENERATION, D118 RUN_STATUS, and the buffer-ready status flag reset. "
+        "The old words are invalid and must never be exported or acknowledged."
+    )
+    assert restart_rule in readme
+    assert restart_rule in register_map
+    assert (
+        "Bind the address, then verify AutoShop automatically displays non-retained/private "
+        "for D0:D206 and retained/private for D2000:D4159. Do not override the fixed "
+        "address-derived property."
+    ) in readme
+
+
 def test_plc_reference_uses_only_protocol_v2_variable_names() -> None:
     constants = source("Turntable_Constants.st")
     active_sources = "\n".join(

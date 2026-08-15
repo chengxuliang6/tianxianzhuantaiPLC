@@ -19,10 +19,11 @@ write. If it differs, stop and correct the single PC codec and this contract.
 Create one **global** variable table named `MODBUS_D` by pasting the `VAR_GLOBAL`
 section in `Turntable_Constants.st`. In its AutoShop address column bind one
 `INT` to each address exactly as listed. Do not redeclare these names in
-`PRG_MAIN`. Set every scalar wire word to AutoShop **non-retained / private**
-so a restart never replays a command. Set the event array to **retained /
-private** so a completed buffer survives a restart. Initial values are bit
-patterns where `16#` notation is shown.
+`PRG_MAIN`. Bind the address, then verify AutoShop automatically displays non-retained/private
+for D0:D206 and retained/private for D2000:D4159. Do not override the fixed
+address-derived property. After a PLC restart, raw D2000:D4159 words may persist, but D116 EVENT_COUNT,
+D117 EVENT_GENERATION, D118 RUN_STATUS, and the buffer-ready status flag reset. The old words are invalid and must never be exported or acknowledged.
+Initial values are bit patterns where `16#` notation is shown.
 
 | Address | Variable | Type | AutoShop property | Initial | Description |
 |---|---|---|---|---|---|
@@ -77,14 +78,13 @@ patterns where `16#` notation is shown.
 | D2000:D4159 | aD2000Events[0..2159] | ARRAY[0..2159] OF INT | retained / private | 0 | 2160 INT words: 360 records * 6 contiguous words |
 
 The retained internal items are deliberately **unbound**: `bZeroValid` and the
-retained stop reason in `FB_TurntableControl`. Mark those FB retained variables
-`R` in the POU variable editor if AutoShop requires an explicit retention flag.
-They are not wire registers; `aD2000Events` is the retained/private bound event
-array. Define only `udiPlcTickMs`, PLCopen feedback/command
+retained stop reason in `FB_TurntableControl`. They are not wire registers;
+`aD2000Events` is the retained/private bound event array. Define only
+`udiPlcTickMs`, PLCopen feedback/command
 variables, decoded internal parameters, and the two FB instances in the
 `PRG_MAIN` POU variable editor; do not define another MODBUS_D table there. A
-buffer is sealed after a run and is released only by
-a changed `BUFFER_ACK_SEQ` after the PC has durably saved it.
+buffer is sealed after a run and is released only by a changed `BUFFER_ACK_SEQ`
+after the PC has durably saved it without a PLC restart.
 
 ## Page-by-page AutoShop configuration
 

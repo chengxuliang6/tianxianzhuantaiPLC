@@ -74,6 +74,10 @@
 
 PLC 在电脑以 `BUFFER_ACK_SEQ` 确认成功持久化前保留这些记录，下一次测试不得静默覆盖未确认缓冲区。
 
+After a PLC restart, raw D2000:D4159 words may persist, but D116 EVENT_COUNT,
+D117 EVENT_GENERATION, D118 RUN_STATUS, and the buffer-ready status flag reset.
+The old words are invalid and must never be exported or acknowledged.
+
 ## Migration background (protocol v1 only)
 
 The obsolete v1 mapping used D1000:D1019, D1100:D1120, and D1200:D1206. It is retained here only to help migrate existing installations; it is not a current address assignment and must not be entered in AutoShop or used by PC software.
