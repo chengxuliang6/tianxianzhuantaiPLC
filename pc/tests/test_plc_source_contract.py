@@ -261,8 +261,20 @@ def test_delivery_docs_state_only_the_protocol_v2_commissioning_contract() -> No
 
 def test_plc_readme_defers_physical_direction_verification_to_controlled_commissioning() -> None:
     readme = (PLC / "README.md").read_text(encoding="utf-8")
-    pre_commissioning, heading, _ = readme.partition("8. **Commissioning page.**")
+    pre_commissioning, heading, post_commissioning = readme.partition("8. **Commissioning page.**")
+    normalized_pre_commissioning = " ".join(pre_commissioning.split())
+    normalized_post_commissioning = " ".join(post_commissioning.split())
 
     assert heading
-    assert "Verify positive direction" not in pre_commissioning
-    assert "unloaded 1 degrees/s" not in pre_commissioning
+    assert "Inspect the configured positive-direction mapping" in pre_commissioning
+    assert "do not enable or command physical motion during this offline configuration" in normalized_pre_commissioning
+    assert "physical direction" not in pre_commissioning
+    assert "CW/CCW physical direction" in normalized_post_commissioning
+    assert "approximately 1 degree CW/CCW small displacement" in post_commissioning
+
+    normalized = " ".join(readme.split())
+    offline_compile = "then compile offline to zero errors before considering a download."
+    read_only_gate = "Read and verify the D0201/D0202 `0x1234`/`0x5678` word-order probe before any hardware write."
+    download_authorization = "Download only while the user is present and documented safety preconditions are met."
+    controlled_motion = "approximately 1 degree CW/CCW small displacement"
+    assert normalized.index(offline_compile) < normalized.index(read_only_gate) < normalized.index(download_authorization) < normalized.index(controlled_motion)
