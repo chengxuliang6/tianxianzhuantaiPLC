@@ -20,14 +20,14 @@
 
 - `docs/verification-report.md`：已模拟验证、静态检查和现场待验证的明确分界。
 - `docs/worklog/2026-08-11-development-log.md`：Task 1～9 的开发与复审日志。
-- `pc/tests/`：自动化测试；Task 5 重建后的全量离线基线为 359 项通过。
+- `pc/tests/`：自动化测试；最终协议 v2 交付的全量离线基线为 372 项通过。
 - `scripts/build-windows.ps1`：可复现 one-directory Windows 打包与无网络模拟器 smoke。
 
 本地构建产物（未提交 Git）：
 
 `dist\TurntableControl\TurntableControl.exe`
 
-Task 5 重建（2026-08-15 15:06:33 +08:00）：`TurntableControl.exe` 为 `2,663,846` 字节，SHA-256 为 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF`。该本地 `dist/` 产物被 Git 忽略，未提交；源码变化后必须重新构建并更新哈希，不能继续分发旧包。
+最终协议 v2 重建（2026-08-15 15:45:54 +08:00）：`TurntableControl.exe` 为 `2,664,444` 字节，SHA-256 为 `4D22F4D52894536191657074ACCB95FA6729D767F138AB87E3BDEDB5C5E032F6`。此前 Task 5 的 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF` 包基线已被替代，不得继续分发。当前本地 `dist/` 产物被 Git 忽略，未提交；源码变化后必须重新构建并更新哈希。
 
 ## 当前完成边界
 

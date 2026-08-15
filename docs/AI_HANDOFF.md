@@ -20,7 +20,9 @@
 
 \- 无 PLC 模拟器已完成
 
-\- Windows EXE 已生成
+\- Windows EXE 已生成；当前最终协议 v2 包为 `dist\TurntableControl\TurntableControl.exe`，大小 `2,664,444` 字节，SHA-256 `4D22F4D52894536191657074ACCB95FA6729D767F138AB87E3BDEDB5C5E032F6`
+
+\- 此前 Task 5 的 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF` 包基线已被上述新包替代，不再作为当前交付
 
 \- PLC Structured Text 参考程序已完成
 
@@ -42,7 +44,7 @@
 
 \- 逐度时间戳和 CSV 保存已实现
 
-\- 最近一次完整软件测试（Task 4 协议 v2 文档迁移后）：359项通过
+\- 最近一次完整软件测试（最终协议 v2 Windows 交付重建）：372项通过
 
 
 

@@ -353,6 +353,13 @@
 - 重建 EXE 位于 `dist\TurntableControl\TurntableControl.exe`，大小 `2,663,846` 字节，最后写入时间 `2026-08-15 15:06:33 +08:00`，SHA-256 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF`。`dist/` 保持 Git 忽略，未作为交付证据提交。
 - 对 `pc/src`、`plc`、`README.md` 和 `docs` 进行了旧 v1 地址扫描。仅命中本日志中已经明确标注为历史迁移记录的条目，以及 `plc/register-map.md` 的废弃 v1 映射说明；未发现当前协议 v2 合同依赖。
 
+## 协议 v2 最终 Windows 交付重建（2026-08-15）
+
+- 基于 `386533e` 的最新协议 v2 源码，使用 sibling `.venv` 的 Python 3.12.13，并显式将当前工作树 `pc\src` 置于 `PYTHONPATH` 首位。新鲜全量 PC 测试为 `372 passed`，`compileall -q pc/src` 与 `git diff --check` 均以退出码 0 完成。
+- `scripts\build-windows.ps1` 完成干净 one-directory 构建并输出“构建与无网络启动检查通过”；重建包随后以 `--simulator --package-smoke --data-dir .\data\package-smoke-final-386533e` 在独立数据目录再次验证，退出码为 0。
+- 当前 `dist\TurntableControl\TurntableControl.exe` 为 `2,664,444` 字节，最后写入时间 `2026-08-15 15:45:54 +08:00`，SHA-256 `4D22F4D52894536191657074ACCB95FA6729D767F138AB87E3BDEDB5C5E032F6`。此前 Task 5 的 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF` 包基线已被替代，不再交付；`dist/` 继续被 Git 忽略且不提交。
+- 本次只执行本地 offscreen 测试、编译检查、打包和模拟器 smoke；未访问网络、PLC、AutoShop、伺服或转台硬件，也未声称 AutoShop 编译或现场验证通过。
+
 ## Task 10 准备：现场 PLC 与安全联调
 
 - 已生成现场清单，按不上电机械检查、AutoShop 离线编译、指定 PLC 的只读网络/字序检查、下载授权、空载 1°/s 极小位移、心跳停止和禁止高速度/整圈/带载门禁排序。

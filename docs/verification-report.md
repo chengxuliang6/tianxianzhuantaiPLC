@@ -24,7 +24,7 @@
 
 ## 最新验证证据
 
-2026-08-15 Task 5 最终交付验证使用项目 `.venv` 的 Python 3.12.13。共享环境的可编辑安装指向另一工作树，因此验证进程以当前工作树的 `pc\\src` 置于导入路径首位；未修改依赖、构建脚本或受版本控制的源码：
+2026-08-15 最终协议 v2 交付验证使用 sibling `.venv` 的 Python 3.12.13。当前工作树的 `.venv` 目录联接复用该环境，因此验证进程显式将当前工作树的 `pc\\src` 置于导入路径首位；未修改依赖或构建脚本：
 
 ```powershell
 $env:QT_QPA_PLATFORM='offscreen'
@@ -34,10 +34,10 @@ $env:PYTHONPATH=(Resolve-Path '.\pc\src').Path
 .\.venv\Scripts\python.exe -m compileall -q pc/src
 git diff --check
 .\scripts\build-windows.ps1
-& '.\dist\TurntableControl\TurntableControl.exe' --simulator --package-smoke --data-dir '.\data\package-smoke-v2'
+& '.\dist\TurntableControl\TurntableControl.exe' --simulator --package-smoke --data-dir '.\data\package-smoke-final-386533e'
 ```
 
-最终结果：构建前和构建后均完成全量 PC 测试；构建后新鲜运行结果为 `359 passed in 7.11s`。`compileall` 与 `git diff --check` 均以退出码 0 完成；`build-windows.ps1` 输出“构建与无网络启动检查通过”；独立 `--simulator --package-smoke` 以退出码 0 完成。
+最终结果：全量 PC 测试为 `372 passed`。`compileall` 与 `git diff --check` 均以退出码 0 完成；`build-windows.ps1` 输出“构建与无网络启动检查通过”；独立数据目录下的 `--simulator --package-smoke` 以退出码 0 完成。
 
 Windows 构建环境：PyInstaller 6.22.0、Python 3.12.13、Windows 11。输出：
 
@@ -45,7 +45,7 @@ Windows 构建环境：PyInstaller 6.22.0、Python 3.12.13、Windows 11。输出
 
 构建脚本会把当前 Python 的 `DLLs` 目录置于 `PATH` 首位，避免错误收集 Anaconda/Git 的不兼容 OpenSSL；正式包验证为 OpenSSL 3.5.7。构建后以 `--simulator --package-smoke` 启动真实 GUI 路径并在 250 ms 后自动退出，全程无 PLC/网络访问。
 
-本次重建 EXE 为 `2,663,846` 字节，最后写入时间为 `2026-08-15 15:06:33 +08:00`，SHA-256 为 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF`。
+本次最终重建 EXE 为 `2,664,444` 字节，最后写入时间为 `2026-08-15 15:45:54 +08:00`，SHA-256 为 `4D22F4D52894536191657074ACCB95FA6729D767F138AB87E3BDEDB5C5E032F6`。此前 Task 5 的 `A8FD9CA3D02190791BCCEA137225AD8F8177F9B2084A69E8F9C85F266CE733AF` 包基线已被替代，不再作为当前交付。
 
 ## 已验证、静态检查与现场待验证
 
