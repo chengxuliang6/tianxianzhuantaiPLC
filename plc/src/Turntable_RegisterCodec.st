@@ -1,7 +1,7 @@
 (******************************************************************************
   AutoShop LiteST reference source -- create these two FCs before the FBs.
   DINT values are always explicitly represented as high-word then low-word INTs.
-  Read and verify D1201:D1202 (0x1234/0x5678) on the actual PLC before any
+  Read and verify D0201:D0202 (0x1234/0x5678) on the actual PLC before any
   hardware write.  Do not rely on a native DINT variable-table binding order.
 ******************************************************************************)
 FUNCTION FC_DecodeI32 : DINT

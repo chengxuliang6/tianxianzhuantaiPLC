@@ -175,7 +175,7 @@ def test_readme_covers_binding_configuration_safety_and_resource_limits() -> Non
 def test_plc_reference_uses_only_protocol_v2_variable_names() -> None:
     constants = source("Turntable_Constants.st")
     active_sources = "\n".join(
-        source(name) for name in ("Turntable_Constants.st", "PRG_MAIN.st")
+        path.read_text(encoding="utf-8") for path in SRC.glob("*.st")
     )
     expected = [
         *(f"iD{address:04d}{suffix}" for address, suffix in (
@@ -203,6 +203,7 @@ def test_plc_reference_uses_only_protocol_v2_variable_names() -> None:
         assert name in constants
     assert re.search(r"PROTOCOL_VERSION\s*:\s*UINT\s*:=\s*2\s*;", constants)
     assert not re.search(r"\biD(?:100\d|101\d|110\d|111\d|1120|120\d)\w*\b", active_sources)
+    assert "D1201:D1202" not in active_sources
 
 
 def test_reference_texts_are_litest_sized_and_avoid_dynamic_allocation() -> None:
