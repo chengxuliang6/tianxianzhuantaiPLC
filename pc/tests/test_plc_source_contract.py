@@ -69,7 +69,7 @@ def test_logger_keeps_all_crossings_and_encodes_elapsed_as_u32() -> None:
     logger = source("FB_DegreeLogger.st")
     codec = source("Turntable_RegisterCodec.st")
     assert "FOR iCrossing := 1 TO 360" in logger
-    assert "udiElapsedMs : UDINT" in logger
+    assert "udiElapsedMs : DINT" in logger
     assert "FC_SplitU32" in logger and "FC_SplitU32" in codec
 
 
@@ -134,7 +134,7 @@ def test_constants_cover_register_contract_motion_contract_and_event_extent() ->
         assert f"D{register:04d}" in constants
     for register in range(200, 207):
         assert f"D{register:04d}" in constants
-    for token in ("16#1234", "16#5678", "360", "6", "D4159", "50000", "5000", "10000", "-360.0", "360.0", "1.0", "2.0", "4.0", "5.0", "10.0", "DIRECTION_CW", "DIRECTION_CCW"):
+    for token in ("4660", "22136", "360", "6", "D4159", "50000", "5000", "10000", "-360.0", "360.0", "1.0", "2.0", "4.0", "5.0", "10.0", "DIRECTION_CW", "DIRECTION_CCW"):
         assert token in constants
 
 
@@ -218,9 +218,23 @@ def test_plc_reference_uses_only_protocol_v2_variable_names() -> None:
     ]
     for name in expected:
         assert name in constants
-    assert re.search(r"PROTOCOL_VERSION\s*:\s*UINT\s*:=\s*2\s*;", constants)
+    assert re.search(r"PROTOCOL_VERSION\s*:\s*INT\s*:=\s*2\s*;", constants)
     assert not re.search(r"\biD(?:100\d|101\d|110\d|111\d|1120|120\d)\w*\b", active_sources)
     assert "D1201:D1202" not in active_sources
+
+
+def test_autoshop_source_uses_only_supported_signed_integer_types_and_wire_literals() -> None:
+    active_sources = "\n".join(
+        path.read_text(encoding="utf-8") for path in SRC.glob("*.st")
+    )
+    constants = source("Turntable_Constants.st")
+    codec = source("Turntable_RegisterCodec.st")
+
+    assert not re.search(r"\b(?:UINT|UDINT)\b", active_sources)
+    assert re.search(r"PROTOCOL_VERSION\s*:\s*INT\s*:=\s*2\s*;", constants)
+    assert "WORD_ORDER_PROBE_HIGH : INT := 4660" in constants
+    assert "WORD_ORDER_PROBE_LOW : INT := 22136" in constants
+    assert "IF diLowWord < 0 THEN diLowWord := diLowWord + 65536; END_IF;" in codec
 
 
 def test_reference_texts_are_litest_sized_and_avoid_dynamic_allocation() -> None:
