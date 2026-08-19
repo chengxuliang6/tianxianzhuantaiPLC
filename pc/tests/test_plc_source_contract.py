@@ -151,7 +151,7 @@ def test_plc_publishes_latched_run_start_tick_as_high_word_first_u32() -> None:
     ):
         assert token in constants
     assert re.search(
-        r"FC_SplitU32\(udiValue\s*:=\s*fbControl\.udiRunStartTickMs,\s*"
+        r"FC_SplitU32\(diValue\s*:=\s*fbControl\.udiRunStartTickMs,\s*"
         r"iHighWord\s*=>\s*iD0119RunStartTickHi,\s*"
         r"iLowWord\s*=>\s*iD0120RunStartTickLo\)",
         main,
@@ -227,6 +227,7 @@ def test_autoshop_source_uses_only_supported_signed_integer_types_and_wire_liter
     active_sources = "\n".join(
         path.read_text(encoding="utf-8") for path in SRC.glob("*.st")
     )
+    assert re.search(r"FUNCTION\s+FC_SplitU32\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*diValue\s*:\s*DINT", source("Turntable_RegisterCodec.st"))
     constants = source("Turntable_Constants.st")
     codec = source("Turntable_RegisterCodec.st")
 

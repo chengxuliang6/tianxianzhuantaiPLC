@@ -8,8 +8,8 @@ VAR_INPUT
     rCurrentPositionDeg : REAL;
     rRunOriginDeg : REAL;
     iDirection : INT;
-    udiRunStartTickMs : UDINT;
-    udiNowTickMs : UDINT;
+    udiRunStartTickMs : DINT;
+    udiNowTickMs : DINT;
     bRunStarted : BOOL;
     bRunFinished : BOOL;
     bBufferAckEdge : BOOL;
@@ -19,8 +19,8 @@ VAR_IN_OUT
 END_VAR
 VAR_OUTPUT
     bBufferReady : BOOL;
-    uiEventCount : UINT;
-    uiGeneration : UINT;
+    uiEventCount : INT;
+    uiGeneration : INT;
 END_VAR
 VAR
     rPreviousTravel : REAL;
@@ -32,7 +32,7 @@ VAR
     iTravelAngle : INT;
     iBase : INT;
     diPositionMdeg : DINT;
-    udiElapsedMs : UDINT;
+    udiElapsedMs : DINT;
     iPositionHigh : INT;
     iPositionLow : INT;
     iElapsedHigh : INT;
@@ -67,10 +67,10 @@ IF NOT bBufferReady AND NOT bRunStarted THEN
             iBase := 6 * uiEventCount;
             rCrossingPosition := rRunOriginDeg + REAL(iDirection) * REAL(iTravelAngle);
             diPositionMdeg := REAL_TO_DINT(rCrossingPosition * 1000.0);
-            (* UDINT subtraction intentionally handles the 49.7-day tick wrap. *)
+            (* Raw DINT subtraction preserves the tick's 32 wire bits. *)
             udiElapsedMs := udiNowTickMs - udiRunStartTickMs;
             FC_SplitI32(diValue := diPositionMdeg, iHighWord => iPositionHigh, iLowWord => iPositionLow);
-            FC_SplitU32(udiValue := udiElapsedMs, iHighWord => iElapsedHigh, iLowWord => iElapsedLow);
+            FC_SplitU32(diValue := udiElapsedMs, iHighWord => iElapsedHigh, iLowWord => iElapsedLow);
             aEventWords[iBase + 0] := INT(uiEventCount + 1);
             aEventWords[iBase + 1] := iTravelAngle;
             aEventWords[iBase + 2] := iPositionHigh;
