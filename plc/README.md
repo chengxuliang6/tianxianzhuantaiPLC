@@ -20,6 +20,10 @@ AutoShop V4.12 does not support `UINT` or `UDINT` in the operator tables. Use
 `INT` for every 16-bit wire value, including values represented as unsigned
 bit patterns. Enter these initial values in decimal:
 
+操作员类型映射：每个 16 位 D 寄存器字都使用有符号 `INT`；由两个 D 字解码出的
+32 位过程值，以及原始 tick 位模式，在变量表中使用有符号 `DINT`。禁止使用
+`UINT` 或 `UDINT`。
+
 ```text
 D0011 = -15536
 D0201 = 4660
