@@ -17,6 +17,16 @@ def source(name: str) -> str:
     return (SRC / name).read_text(encoding="utf-8")
 
 
+def function_body(text: str, name: str) -> str:
+    match = re.search(
+        rf"FUNCTION\s+{re.escape(name)}\s*:\s*\w+.*?END_FUNCTION",
+        text,
+        re.DOTALL,
+    )
+    assert match, f"missing {name}"
+    return match.group(0)
+
+
 def test_main_has_all_manual_confirmed_plcopen_calls_and_pins() -> None:
     main = source("PRG_MAIN.st")
     required = {
@@ -69,7 +79,7 @@ def test_logger_keeps_all_crossings_and_encodes_elapsed_as_u32() -> None:
     logger = source("FB_DegreeLogger.st")
     codec = source("Turntable_RegisterCodec.st")
     assert "FOR iCrossing := 1 TO 360" in logger
-    assert "udiElapsedMs : UDINT" in logger
+    assert "udiElapsedMs : DINT" in logger
     assert "FC_SplitU32" in logger and "FC_SplitU32" in codec
 
 
@@ -134,7 +144,7 @@ def test_constants_cover_register_contract_motion_contract_and_event_extent() ->
         assert f"D{register:04d}" in constants
     for register in range(200, 207):
         assert f"D{register:04d}" in constants
-    for token in ("16#1234", "16#5678", "360", "6", "D4159", "50000", "5000", "10000", "-360.0", "360.0", "1.0", "2.0", "4.0", "5.0", "10.0", "DIRECTION_CW", "DIRECTION_CCW"):
+    for token in ("4660", "22136", "360", "6", "D4159", "50000", "5000", "10000", "-360.0", "360.0", "1.0", "2.0", "4.0", "5.0", "10.0", "DIRECTION_CW", "DIRECTION_CCW"):
         assert token in constants
 
 
@@ -151,7 +161,7 @@ def test_plc_publishes_latched_run_start_tick_as_high_word_first_u32() -> None:
     ):
         assert token in constants
     assert re.search(
-        r"FC_SplitU32\(udiValue\s*:=\s*fbControl\.udiRunStartTickMs,\s*"
+        r"FC_SplitU32\(diValue\s*:=\s*fbControl\.udiRunStartTickMs,\s*"
         r"iHighWord\s*=>\s*iD0119RunStartTickHi,\s*"
         r"iLowWord\s*=>\s*iD0120RunStartTickLo\)",
         main,
@@ -218,9 +228,125 @@ def test_plc_reference_uses_only_protocol_v2_variable_names() -> None:
     ]
     for name in expected:
         assert name in constants
-    assert re.search(r"PROTOCOL_VERSION\s*:\s*UINT\s*:=\s*2\s*;", constants)
+    assert re.search(r"PROTOCOL_VERSION\s*:\s*INT\s*:=\s*2\s*;", constants)
     assert not re.search(r"\biD(?:100\d|101\d|110\d|111\d|1120|120\d)\w*\b", active_sources)
     assert "D1201:D1202" not in active_sources
+
+
+def test_autoshop_source_uses_only_supported_signed_integer_types_and_wire_literals() -> None:
+    active_sources = "\n".join(
+        path.read_text(encoding="utf-8") for path in SRC.glob("*.st")
+    )
+    assert re.search(r"FUNCTION\s+FC_SplitU32\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*diValue\s*:\s*DINT", source("Turntable_RegisterCodec.st"))
+    constants = source("Turntable_Constants.st")
+    codec = source("Turntable_RegisterCodec.st")
+
+    assert not re.search(r"\b(?:UINT|UDINT)\b", active_sources)
+    assert re.search(r"PROTOCOL_VERSION\s*:\s*INT\s*:=\s*2\s*;", constants)
+    assert "WORD_ORDER_PROBE_HIGH : INT := 4660" in constants
+    assert "WORD_ORDER_PROBE_LOW : INT := 22136" in constants
+    assert "IF diLowWord < 0 THEN diLowWord := diLowWord + 65536; END_IF;" in codec
+
+
+def test_signed_raw_rollovers_and_splitter_normalization_are_explicit() -> None:
+    main = source("PRG_MAIN.st")
+    logger = source("FB_DegreeLogger.st")
+    codec = source("Turntable_RegisterCodec.st")
+
+    assert re.search(
+        r"IF\s+udiPlcTickMs\s*=\s*2147483647\s+THEN\s*"
+        r"udiPlcTickMs\s*:=\s*-2147483648\s*;\s*ELSE\s*"
+        r"udiPlcTickMs\s*:=\s*udiPlcTickMs\s*\+\s*1\s*;\s*END_IF",
+        main,
+    )
+    assert re.search(
+        r"IF\s+uiGeneration\s*=\s*32767\s+THEN\s*"
+        r"uiGeneration\s*:=\s*-32768\s*;\s*ELSE\s*"
+        r"uiGeneration\s*:=\s*uiGeneration\s*\+\s*1\s*;\s*END_IF",
+        logger,
+    )
+    assert "diElapsedBeforeWrap" in logger and "diElapsedAfterWrap" in logger
+    assert re.search(
+        r"IF\s+\(udiNowTickMs\s*<\s*0\)\s+AND\s+"
+        r"\(udiRunStartTickMs\s*>=\s*0\)\s+THEN.*?"
+        r"diElapsedBeforeWrap\s*:=\s*2147483647\s*-\s*udiRunStartTickMs\s*;.*?"
+        r"diElapsedAfterWrap\s*:=\s*udiNowTickMs\s*-\s*\(-2147483648\)\s*;.*?"
+        r"IF\s+diElapsedBeforeWrap\s*<\s*2147483647\s*-\s*"
+        r"diElapsedAfterWrap\s+THEN.*?"
+        r"udiElapsedMs\s*:=\s*diElapsedBeforeWrap\s*\+\s*"
+        r"diElapsedAfterWrap\s*\+\s*1\s*;.*?"
+        r"udiElapsedMs\s*:=\s*-2147483648\s*\+",
+        logger,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"ELSIF\s+\(udiNowTickMs\s*>=\s*0\)\s+AND\s+"
+        r"\(udiRunStartTickMs\s*<\s*0\)\s+THEN.*?"
+        r"diElapsedBeforeWrap\s*:=\s*2147483647\s*-\s*"
+        r"\(udiRunStartTickMs\s*-\s*\(-2147483648\)\)\s*;.*?"
+        r"diElapsedAfterWrap\s*:=\s*udiNowTickMs\s*;.*?"
+        r"IF\s+diElapsedBeforeWrap\s*<\s*2147483647\s*-\s*"
+        r"diElapsedAfterWrap\s+THEN.*?"
+        r"udiElapsedMs\s*:=\s*diElapsedBeforeWrap\s*\+\s*"
+        r"diElapsedAfterWrap\s*\+\s*1\s*;.*?"
+        r"udiElapsedMs\s*:=\s*-2147483648\s*\+\s*"
+        r"\(diElapsedBeforeWrap\s*-\s*\(2147483647\s*-\s*"
+        r"diElapsedAfterWrap\)\)",
+        logger,
+        re.DOTALL,
+    )
+
+    for name in ("FC_SplitI32", "FC_SplitU32"):
+        splitter = function_body(codec, name)
+        assert re.search(
+            r"FUNCTION\s+" + name + r"\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*"
+            r"diValue\s*:\s*DINT\s*;",
+            splitter,
+        )
+        assert "diHighWord := diValue / 65536;" in splitter
+        assert "diLowWord := diValue MOD 65536;" in splitter
+        assert re.search(
+            r"IF\s+diLowWord\s*<\s*0\s+THEN\s*"
+            r"diLowWord\s*:=\s*diLowWord\s*\+\s*65536\s*;\s*"
+            r"diHighWord\s*:=\s*diHighWord\s*-\s*1\s*;\s*END_IF",
+            splitter,
+        )
+        assert "IF diHighWord >= 32768 THEN diHighWord := diHighWord - 65536; END_IF;" in splitter
+        assert "IF diLowWord >= 32768 THEN diLowWord := diLowWord - 65536; END_IF;" in splitter
+        assert "iHighWord := DINT_TO_INT(diHighWord);" in splitter
+        assert "iLowWord := DINT_TO_INT(diLowWord);" in splitter
+
+
+def test_elapsed_raw_u32_reference_model_handles_signed_boundaries() -> None:
+    dint_min = -2147483648
+    dint_max = 2147483647
+
+    def plc_elapsed_model(start: int, now: int) -> int:
+        if now < 0 <= start:
+            before_wrap = dint_max - start
+            after_wrap = now - dint_min
+        elif now >= 0 > start:
+            before_wrap = dint_max - (start - dint_min)
+            after_wrap = now
+        else:
+            return now - start
+
+        if before_wrap < dint_max - after_wrap:
+            return before_wrap + after_wrap + 1
+        return dint_min + (before_wrap - (dint_max - after_wrap))
+
+    def raw_u32_elapsed(start: int, now: int) -> int:
+        raw = ((now & 0xFFFFFFFF) - (start & 0xFFFFFFFF)) & 0xFFFFFFFF
+        return raw if raw <= dint_max else raw - 0x100000000
+
+    for start, now, expected in (
+        (dint_min, 0, dint_min),
+        (-1, dint_max, dint_min),
+        (dint_min, dint_max, -1),
+        (dint_max, dint_min, 1),
+    ):
+        assert raw_u32_elapsed(start, now) == expected
+        assert plc_elapsed_model(start, now) == expected
 
 
 def test_reference_texts_are_litest_sized_and_avoid_dynamic_allocation() -> None:

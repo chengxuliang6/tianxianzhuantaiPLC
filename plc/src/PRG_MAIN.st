@@ -5,7 +5,7 @@
 ******************************************************************************)
 PROGRAM PRG_MAIN
 VAR
-    udiPlcTickMs : UDINT;
+    udiPlcTickMs : DINT;
     rActualPosition, rActualVelocity : REAL;
     rMoveDistance, rSelectedVelocity, rAcceleration, rDeceleration, rStopDeceleration : REAL;
     bPowerEnable, bPowerStatus, bPowerBusy, bPowerError : BOOL;
@@ -26,7 +26,7 @@ VAR
     rLoggerPosition : REAL;
     bLoggerStarted, bLoggerFinished, bLoggerAck : BOOL;
     bLoggerBufferReady : BOOL;
-    uiLoggerEventCount, uiLoggerGeneration : UINT;
+    uiLoggerEventCount, uiLoggerGeneration : INT;
     diPositionMdeg, diTargetMdeg, diVelocityMdegS : DINT;
     diTotalRatioMilli, diRequestedAccelMilli, diRequestedDecelMilli : DINT;
     diRequestedStopDecelMilli, diBacklashMilli : DINT;
@@ -35,7 +35,11 @@ VAR
 END_VAR
 
 (* PRG_MAIN must be scheduled as a constant 1 ms task; tick is not retained. *)
-udiPlcTickMs := udiPlcTickMs + 1;
+IF udiPlcTickMs = 2147483647 THEN
+    udiPlcTickMs := -2147483648;
+ELSE
+    udiPlcTickMs := udiPlcTickMs + 1;
+END_IF;
 
 (* Decode all runtime parameters explicitly. D0010 ratio must match the
    offline Axis_0 scaling; phase 1 does not perform backlash compensation. *)
@@ -63,11 +67,11 @@ END_IF;
 
 (* 2. Deterministic command/state decision uses current feedback and raw INT wire words. *)
 fbControl(
-    uiMode := UINT(iD0000Mode), iDirection := iD0001Direction,
-    uiSpeedIndex := UINT(iD0002SpeedIndex), uiStartSeq := UINT(iD0003StartSeq),
-    uiStopSeq := UINT(iD0004StopSeq), uiSetZeroSeq := UINT(iD0005SetZeroSeq),
-    uiResetFaultSeq := UINT(iD0006ResetFaultSeq), uiPowerSeq := UINT(iD0007PowerSeq),
-    uiHeartbeat := UINT(iD0008Heartbeat), uiBufferAckSeq := UINT(iD0009BufferAckSeq),
+    uiMode := (iD0000Mode), iDirection := iD0001Direction,
+    uiSpeedIndex := iD0002SpeedIndex, uiStartSeq := iD0003StartSeq,
+    uiStopSeq := iD0004StopSeq, uiSetZeroSeq := iD0005SetZeroSeq,
+    uiResetFaultSeq := iD0006ResetFaultSeq, uiPowerSeq := iD0007PowerSeq,
+    uiHeartbeat := iD0008Heartbeat, uiBufferAckSeq := iD0009BufferAckSeq,
     udiNowTickMs := udiPlcTickMs,
     diTotalRatioMilli := diTotalRatioMilli, diRequestedAccelMilli := diRequestedAccelMilli,
     diRequestedDecelMilli := diRequestedDecelMilli, diRequestedStopDecelMilli := diRequestedStopDecelMilli,
@@ -156,6 +160,6 @@ diVelocityMdegS := REAL_TO_DINT(rActualVelocity * 1000.0);
 FC_SplitI32(diValue := diPositionMdeg, iHighWord => iD0103PositionHi, iLowWord => iD0104PositionLo);
 FC_SplitI32(diValue := diTargetMdeg, iHighWord => iD0105TargetHi, iLowWord => iD0106TargetLo);
 FC_SplitI32(diValue := diVelocityMdegS, iHighWord => iD0107VelocityHi, iLowWord => iD0108VelocityLo);
-FC_SplitU32(udiValue := fbControl.udiRunStartTickMs, iHighWord => iD0119RunStartTickHi, iLowWord => iD0120RunStartTickLo);
-FC_SplitU32(udiValue := udiPlcTickMs, iHighWord => iD0204TickHi, iLowWord => iD0205TickLo);
+FC_SplitU32(diValue := fbControl.udiRunStartTickMs, iHighWord => iD0119RunStartTickHi, iLowWord => iD0120RunStartTickLo);
+FC_SplitU32(diValue := udiPlcTickMs, iHighWord => iD0204TickHi, iLowWord => iD0205TickLo);
 END_PROGRAM

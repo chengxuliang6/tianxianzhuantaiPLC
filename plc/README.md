@@ -14,6 +14,26 @@ Use `FC_DecodeI32`/`FC_SplitI32` for high-word-first signed 32-bit values and
 post-download read-only gate before PC Modbus writes; it is not a prerequisite
 for the initial user-authorized USB download to an old or empty PLC.
 
+### AutoShop V4.12 type and initial-value note
+
+AutoShop V4.12 does not support `UINT` or `UDINT` in the operator tables. Use
+`INT` for every 16-bit wire value, including values represented as unsigned
+bit patterns. Enter these initial values in decimal:
+
+操作员类型映射：每个 16 位 D 寄存器字都使用有符号 `INT`；由两个 D 字解码出的
+32 位过程值，以及原始 tick 位模式，在变量表中使用有符号 `DINT`。禁止使用
+`UINT` 或 `UDINT`。
+
+```text
+D0011 = -15536
+D0201 = 4660
+D0202 = 22136
+```
+
+Offline AutoShop compilation is an operator action. It must finish with `0
+error` and `0 warning` before any request to download; this reference set does
+not claim that compilation has been performed.
+
 ## Variable table: MODBUS_D
 
 Create one **global** variable table named `MODBUS_D` by pasting the `VAR_GLOBAL`
@@ -23,7 +43,7 @@ section in `Turntable_Constants.st`. In its AutoShop address column bind one
 for D0:D206 and retained/private for D2000:D4159. Do not override the fixed
 address-derived property. After a PLC restart, raw D2000:D4159 words may persist, but D116 EVENT_COUNT,
 D117 EVENT_GENERATION, D118 RUN_STATUS, and the buffer-ready status flag reset. The old words are invalid and must never be exported or acknowledged.
-Initial values are bit patterns where `16#` notation is shown.
+Initial values are signed decimal `INT` entries.
 
 | Address | Variable | Type | AutoShop property | Initial | Description |
 |---|---|---|---|---|---|
@@ -38,7 +58,7 @@ Initial values are bit patterns where `16#` notation is shown.
 | D0008 | iD0008Heartbeat | INT | non-retained / private | 0 | HEARTBEAT bit pattern |
 | D0009 | iD0009BufferAckSeq | INT | non-retained / private | 0 | BUFFER_ACK_SEQ bit pattern |
 | D0010 | iD0010RatioHi | INT | non-retained / private | 0 | TOTAL_RATIO high word |
-| D0011 | iD0011RatioLo | INT | non-retained / private | 16#C350 | TOTAL_RATIO low word, 50000 milli |
+| D0011 | iD0011RatioLo | INT | non-retained / private | -15536 | TOTAL_RATIO low word, 50000 milli |
 | D0012 | iD0012AccelHi | INT | non-retained / private | 0 | ACCELERATION high word |
 | D0013 | iD0013AccelLo | INT | non-retained / private | 5000 | ACCELERATION low word, 5.000 deg/s2 |
 | D0014 | iD0014DecelHi | INT | non-retained / private | 0 | DECELERATION high word |
@@ -69,8 +89,8 @@ Initial values are bit patterns where `16#` notation is shown.
 | D0119 | iD0119RunStartTickHi | INT | non-retained / private | 0 | RUN_START_TICK_MS raw u32 high word |
 | D0120 | iD0120RunStartTickLo | INT | non-retained / private | 0 | RUN_START_TICK_MS raw u32 low word |
 | D0200 | iD0200ProtocolVersion | INT | non-retained / private | 2 | protocol version 2, PLC writes |
-| D0201 | iD0201WordOrderHi | INT | non-retained / private | 16#1234 | word-order probe high word |
-| D0202 | iD0202WordOrderLo | INT | non-retained / private | 16#5678 | word-order probe low word |
+| D0201 | iD0201WordOrderHi | INT | non-retained / private | 4660 | word-order probe high word |
+| D0202 | iD0202WordOrderLo | INT | non-retained / private | 22136 | word-order probe low word |
 | D0203 | iD0203TimeSyncRequest | INT | non-retained / private | 0 | PC time-sync request sequence |
 | D0204 | iD0204TickHi | INT | non-retained / private | 0 | PLC_TICK_MS raw u32 high word |
 | D0205 | iD0205TickLo | INT | non-retained / private | 0 | PLC_TICK_MS raw u32 low word |

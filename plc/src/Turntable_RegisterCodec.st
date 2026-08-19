@@ -9,8 +9,12 @@ VAR_INPUT
     iHighWord : INT;
     iLowWord : INT;
 END_VAR
-(* iHighWord is signed; UINT(iLowWord) preserves its 16 wire bits. *)
-FC_DecodeI32 := DINT(iHighWord) * 65536 + DINT(UINT(iLowWord));
+VAR
+    diLowWord : DINT;
+END_VAR
+diLowWord := INT_TO_DINT(iLowWord);
+IF diLowWord < 0 THEN diLowWord := diLowWord + 65536; END_IF;
+FC_DecodeI32 := INT_TO_DINT(iHighWord) * 65536 + diLowWord;
 END_FUNCTION
 
 FUNCTION FC_SplitI32 : BOOL
@@ -22,23 +26,43 @@ VAR_OUTPUT
     iLowWord : INT;
 END_VAR
 VAR
-    udiBits : UDINT;
+    diHighWord : DINT;
+    diLowWord : DINT;
 END_VAR
-udiBits := UDINT(diValue);
-iHighWord := INT(SHR(udiBits, 16));
-iLowWord := INT(udiBits AND 16#0000FFFF);
+diHighWord := diValue / 65536;
+diLowWord := diValue MOD 65536;
+IF diLowWord < 0 THEN
+    diLowWord := diLowWord + 65536;
+    diHighWord := diHighWord - 1;
+END_IF;
+IF diHighWord >= 32768 THEN diHighWord := diHighWord - 65536; END_IF;
+IF diLowWord >= 32768 THEN diLowWord := diLowWord - 65536; END_IF;
+iHighWord := DINT_TO_INT(diHighWord);
+iLowWord := DINT_TO_INT(diLowWord);
 FC_SplitI32 := TRUE;
 END_FUNCTION
 
 FUNCTION FC_SplitU32 : BOOL
 VAR_INPUT
-    udiValue : UDINT;
+    diValue : DINT;
 END_VAR
 VAR_OUTPUT
     iHighWord : INT;
     iLowWord : INT;
 END_VAR
-iHighWord := INT(SHR(udiValue, 16));
-iLowWord := INT(udiValue AND 16#0000FFFF);
+VAR
+    diHighWord : DINT;
+    diLowWord : DINT;
+END_VAR
+diHighWord := diValue / 65536;
+diLowWord := diValue MOD 65536;
+IF diLowWord < 0 THEN
+    diLowWord := diLowWord + 65536;
+    diHighWord := diHighWord - 1;
+END_IF;
+IF diHighWord >= 32768 THEN diHighWord := diHighWord - 65536; END_IF;
+IF diLowWord >= 32768 THEN diLowWord := diLowWord - 65536; END_IF;
+iHighWord := DINT_TO_INT(diHighWord);
+iLowWord := DINT_TO_INT(diLowWord);
 FC_SplitU32 := TRUE;
 END_FUNCTION

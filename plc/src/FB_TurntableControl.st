@@ -5,10 +5,10 @@
 ******************************************************************************)
 FUNCTION_BLOCK FB_TurntableControl
 VAR_INPUT
-    uiMode : UINT; iDirection : INT; uiSpeedIndex : UINT;
-    uiStartSeq : UINT; uiStopSeq : UINT; uiSetZeroSeq : UINT;
-    uiResetFaultSeq : UINT; uiPowerSeq : UINT; uiHeartbeat : UINT;
-    uiBufferAckSeq : UINT; udiNowTickMs : UDINT;
+    uiMode : INT; iDirection : INT; uiSpeedIndex : INT;
+    uiStartSeq : INT; uiStopSeq : INT; uiSetZeroSeq : INT;
+    uiResetFaultSeq : INT; uiPowerSeq : INT; uiHeartbeat : INT;
+    uiBufferAckSeq : INT; udiNowTickMs : DINT;
     diTotalRatioMilli : DINT; diRequestedAccelMilli : DINT;
     diRequestedDecelMilli : DINT; diRequestedStopDecelMilli : DINT;
     diBacklashMilli : DINT;
@@ -20,7 +20,7 @@ VAR_INPUT
     bStopDone : BOOL; bStopBusy : BOOL; bStopError : BOOL;
     bSetPositionDone : BOOL; bSetPositionError : BOOL;
     bResetDone : BOOL; bResetBusy : BOOL; bResetError : BOOL;
-    bLoggerBufferReady : BOOL; uiLoggerEventCount : UINT;
+    bLoggerBufferReady : BOOL; uiLoggerEventCount : INT;
 END_VAR
 VAR_OUTPUT
     bPowerEnable : BOOL; bMoveRequest : BOOL; bStopRequest : BOOL;
@@ -28,23 +28,23 @@ VAR_OUTPUT
     bRunStarted : BOOL; bRunFinished : BOOL; bBufferAckEdge : BOOL;
     rMoveDistance : REAL; rSelectedVelocity : REAL;
     rAcceleration : REAL; rDeceleration : REAL; rStopDeceleration : REAL;
-    rRunOriginDeg : REAL; iRunDirection : INT; udiRunStartTickMs : UDINT;
+    rRunOriginDeg : REAL; iRunDirection : INT; udiRunStartTickMs : DINT;
     rAcceptedTargetDeg : REAL;
-    uiRunState : UINT; uiRunStatus : UINT; uiFaultCode : UINT;
-    uiStatusFlags : UINT; uiHeartbeatEcho : UINT;
-    uiStartAckSeq : UINT; uiStopAckSeq : UINT; uiSetZeroAckSeq : UINT;
-    uiResetFaultAckSeq : UINT; uiPowerAckSeq : UINT; uiBufferAckedSeq : UINT;
-    uiRetainedStopReason : UINT; bUnsafeStopFailure : BOOL;
+    uiRunState : INT; uiRunStatus : INT; uiFaultCode : INT;
+    uiStatusFlags : INT; uiHeartbeatEcho : INT;
+    uiStartAckSeq : INT; uiStopAckSeq : INT; uiSetZeroAckSeq : INT;
+    uiResetFaultAckSeq : INT; uiPowerAckSeq : INT; uiBufferAckedSeq : INT;
+    uiRetainedStopReason : INT; bUnsafeStopFailure : BOOL;
 END_VAR
 VAR RETAIN
     bZeroValid : BOOL;
-    uiRetainedStopReasonNv : UINT;
+    uiRetainedStopReasonNv : INT;
 END_VAR
 VAR
-    uiLastHeartbeat : UINT; uiHeartbeatAgeScans : UINT;
+    uiLastHeartbeat : INT; uiHeartbeatAgeScans : INT;
     bActiveRun : BOOL; bStopLatched : BOOL; bFaultStopPending : BOOL;
-    uiPendingFaultCode : UINT; bPowerCommandValue : BOOL;
-    bResetPending : BOOL; uiResetPendingSeq : UINT;
+    uiPendingFaultCode : INT; bPowerCommandValue : BOOL;
+    bResetPending : BOOL; uiResetPendingSeq : INT;
     bStartAccepted : BOOL;
     rCandidateTargetDeg : REAL;
 END_VAR
@@ -60,7 +60,7 @@ END_IF;
 
 IF uiHeartbeat <> uiLastHeartbeat THEN
     uiLastHeartbeat := uiHeartbeat; uiHeartbeatAgeScans := 0; uiHeartbeatEcho := uiHeartbeat;
-ELSIF uiHeartbeatAgeScans < 65535 THEN
+ELSIF uiHeartbeatAgeScans < 32767 THEN
     uiHeartbeatAgeScans := uiHeartbeatAgeScans + 1;
 END_IF;
 
