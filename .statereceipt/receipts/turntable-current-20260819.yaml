@@ -1,0 +1,233 @@
+spec:
+  name: StateReceipt
+  version: '0.1'
+receipt:
+  id: sr_ea60f0ce3904
+  created_at: '2026-08-19T17:19:54+08:00'
+  producer:
+    type: ai_agent
+    name: Codex
+  predecessor:
+    id: sr_8d3607793927
+work:
+  id: TURNTABLE-PLC-CURRENT
+  objective: 记录天线测试转台当前软件提交、AutoShop有符号整数兼容改造、验证证据、安全限制和后续现场门禁
+  state: in_progress
+snapshot:
+  artifacts:
+  - id: artifact-001
+    path: README.md
+    digest:
+      algorithm: sha256
+      value: f2b0fd1794ce05c420ae2517ca15a9d2f40cac7f28bce8c1ea7c67c742c779df
+  - id: artifact-002
+    path: docs/AI_HANDOFF.md
+    digest:
+      algorithm: sha256
+      value: 6898c8fcb38dfe31ca5882f1da81cc358b0c2a77158b10509c670aea79cf7a6f
+  - id: artifact-003
+    path: docs/AUTOSHOP_SIGNED_COMPAT_WORKLOG.md
+    digest:
+      algorithm: sha256
+      value: b29b9d79363d22356f3385382c7faa1d8787ba92a5254618fe0c18a4facb793f
+  - id: artifact-004
+    path: docs/delivery-manifest.md
+    digest:
+      algorithm: sha256
+      value: bca87d6478b5b7d237e747d2bfa65cb6875624be471889f24b1c50211545f677
+  - id: artifact-005
+    path: docs/verification-report.md
+    digest:
+      algorithm: sha256
+      value: 4c3eac0af04412c973cfe4671c7e4054b380aa8bb4079e07d99b262247d75ee7
+  - id: artifact-006
+    path: docs/on-site-commissioning-checklist.md
+    digest:
+      algorithm: sha256
+      value: 1bb2352fcb4d2aaec373886ccda4cb5e33f3ecdafcc2b83b58a190996a7d5fc1
+  - id: artifact-007
+    path: plc/README.md
+    digest:
+      algorithm: sha256
+      value: f708539cccec280b66e238260dc8ec7e32a5787eed9dfbed83362a044a4f2534
+  - id: artifact-008
+    path: plc/register-map.md
+    digest:
+      algorithm: sha256
+      value: 18ebfacb58f449ae4e566f503e183c147169c398ee9e22017cd869a166c2f665
+  - id: artifact-009
+    path: plc/src/FB_DegreeLogger.st
+    digest:
+      algorithm: sha256
+      value: 9b678fb2e4679a11170632a30c61725dc4b12903cd14914fac98542003f10371
+  - id: artifact-010
+    path: plc/src/FB_TurntableControl.st
+    digest:
+      algorithm: sha256
+      value: 8530eead670cf78f76773e47d9cc238a7f0f9f266b4d5f6a4dd4d8bd6fac5263
+  - id: artifact-011
+    path: plc/src/PRG_MAIN.st
+    digest:
+      algorithm: sha256
+      value: 36d1ca7dc7b38d7fdc44d4db2a0dcf57c1e1edbb5697cf1d3d61a3dff585993f
+  - id: artifact-012
+    path: plc/src/Turntable_Constants.st
+    digest:
+      algorithm: sha256
+      value: 7c8197029a55d3cc30f313460c96074d46019cc750b82f2e66659bdfd067adc8
+  - id: artifact-013
+    path: plc/src/Turntable_RegisterCodec.st
+    digest:
+      algorithm: sha256
+      value: e15a664dfa43c8daccab65b1449108c146ac72676427c1b6caf7d17e91189da5
+  - id: artifact-014
+    path: pc/tests/test_plc_source_contract.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: 20718dfa38b8c8c3c59006676d845d30fd550f64670db4daf4cc896df4cb0482
+  - id: artifact-015
+    path: pc/src/turntable_control/controller.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: faba9b9fb90429a8d2cab633dcd50a38d395a542ba886ba1b134d799f8d93ee3
+  - id: artifact-016
+    path: pc/src/turntable_control/modbus_client.py
+    media_type: text/x-python
+    digest:
+      algorithm: sha256
+      value: d73287eccd829cb9f2622d2f7432680b54ef130900f281f386d3ef03442937ce
+  repository:
+    vcs: git
+    commit: 9dc49c151c4616a51bd2e6913a9632a5da34d8ac
+    dirty: true
+claims:
+- id: claim-capture
+  kind: observation
+  statement: The listed artifacts were captured at receipt creation time.
+  source:
+    type: tool
+    ref: statereceipt capture
+  verification:
+    status: supported
+  supported_by:
+  - evidence-artifact-001
+  - evidence-artifact-002
+  - evidence-artifact-003
+  - evidence-artifact-004
+  - evidence-artifact-005
+  - evidence-artifact-006
+  - evidence-artifact-007
+  - evidence-artifact-008
+  - evidence-artifact-009
+  - evidence-artifact-010
+  - evidence-artifact-011
+  - evidence-artifact-012
+  - evidence-artifact-013
+  - evidence-artifact-014
+  - evidence-artifact-015
+  - evidence-artifact-016
+  depends_on:
+    artifacts:
+    - artifact-001
+    - artifact-002
+    - artifact-003
+    - artifact-004
+    - artifact-005
+    - artifact-006
+    - artifact-007
+    - artifact-008
+    - artifact-009
+    - artifact-010
+    - artifact-011
+    - artifact-012
+    - artifact-013
+    - artifact-014
+    - artifact-015
+    - artifact-016
+    evidence:
+    - evidence-artifact-001
+    - evidence-artifact-002
+    - evidence-artifact-003
+    - evidence-artifact-004
+    - evidence-artifact-005
+    - evidence-artifact-006
+    - evidence-artifact-007
+    - evidence-artifact-008
+    - evidence-artifact-009
+    - evidence-artifact-010
+    - evidence-artifact-011
+    - evidence-artifact-012
+    - evidence-artifact-013
+    - evidence-artifact-014
+    - evidence-artifact-015
+    - evidence-artifact-016
+evidence:
+- id: evidence-artifact-001
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-001
+- id: evidence-artifact-002
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-002
+- id: evidence-artifact-003
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-003
+- id: evidence-artifact-004
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-004
+- id: evidence-artifact-005
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-005
+- id: evidence-artifact-006
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-006
+- id: evidence-artifact-007
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-007
+- id: evidence-artifact-008
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-008
+- id: evidence-artifact-009
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-009
+- id: evidence-artifact-010
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-010
+- id: evidence-artifact-011
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-011
+- id: evidence-artifact-012
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-012
+- id: evidence-artifact-013
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-013
+- id: evidence-artifact-014
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-014
+- id: evidence-artifact-015
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-015
+- id: evidence-artifact-016
+  type: artifact
+  strength: checkable
+  artifact_ref: artifact-016
+continuation:
+  next_actions: []
+  unresolved: []
