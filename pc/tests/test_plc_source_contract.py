@@ -238,6 +238,53 @@ def test_autoshop_source_uses_only_supported_signed_integer_types_and_wire_liter
     assert "IF diLowWord < 0 THEN diLowWord := diLowWord + 65536; END_IF;" in codec
 
 
+def test_signed_raw_rollovers_and_splitter_normalization_are_explicit() -> None:
+    main = source("PRG_MAIN.st")
+    logger = source("FB_DegreeLogger.st")
+    codec = source("Turntable_RegisterCodec.st")
+
+    assert re.search(
+        r"IF\s+udiPlcTickMs\s*=\s*2147483647\s+THEN\s*"
+        r"udiPlcTickMs\s*:=\s*-2147483648\s*;\s*ELSE\s*"
+        r"udiPlcTickMs\s*:=\s*udiPlcTickMs\s*\+\s*1\s*;\s*END_IF",
+        main,
+    )
+    assert re.search(
+        r"IF\s+uiGeneration\s*=\s*32767\s+THEN\s*"
+        r"uiGeneration\s*:=\s*-32768\s*;\s*ELSE\s*"
+        r"uiGeneration\s*:=\s*uiGeneration\s*\+\s*1\s*;\s*END_IF",
+        logger,
+    )
+    assert "diElapsedBeforeWrap" in logger and "diElapsedAfterWrap" in logger
+    assert re.search(
+        r"IF\s+\(udiNowTickMs\s*<\s*0\)\s+AND\s+"
+        r"\(udiRunStartTickMs\s*>=\s*0\)\s+THEN.*?"
+        r"diElapsedBeforeWrap\s*:=\s*2147483647\s*-\s*udiRunStartTickMs\s*;.*?"
+        r"diElapsedAfterWrap\s*:=\s*udiNowTickMs\s*-\s*\(-2147483648\)\s*;.*?"
+        r"IF\s+diElapsedBeforeWrap\s*<\s*2147483647\s*-\s*"
+        r"diElapsedAfterWrap\s+THEN.*?"
+        r"udiElapsedMs\s*:=\s*diElapsedBeforeWrap\s*\+\s*"
+        r"diElapsedAfterWrap\s*\+\s*1\s*;.*?"
+        r"udiElapsedMs\s*:=\s*-2147483648\s*\+",
+        logger,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"FUNCTION\s+FC_SplitU32\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*"
+        r"diValue\s*:\s*DINT\s*;",
+        codec,
+    )
+    assert re.search(
+        r"FUNCTION\s+FC_SplitI32\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*"
+        r"diValue\s*:\s*DINT\s*;",
+        codec,
+    )
+    assert "diHighWord := diValue / 65536;" in codec
+    assert "diLowWord := diValue MOD 65536;" in codec
+    assert "IF diLowWord < 0 THEN" in codec
+    assert "IF diHighWord >= 32768 THEN" in codec
+
+
 def test_reference_texts_are_litest_sized_and_avoid_dynamic_allocation() -> None:
     for path in SRC.glob("*.st"):
         text = path.read_text(encoding="utf-8")

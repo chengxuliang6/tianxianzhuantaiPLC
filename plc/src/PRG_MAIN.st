@@ -35,7 +35,11 @@ VAR
 END_VAR
 
 (* PRG_MAIN must be scheduled as a constant 1 ms task; tick is not retained. *)
-udiPlcTickMs := udiPlcTickMs + 1;
+IF udiPlcTickMs = 2147483647 THEN
+    udiPlcTickMs := -2147483648;
+ELSE
+    udiPlcTickMs := udiPlcTickMs + 1;
+END_IF;
 
 (* Decode all runtime parameters explicitly. D0010 ratio must match the
    offline Axis_0 scaling; phase 1 does not perform backlash compensation. *)

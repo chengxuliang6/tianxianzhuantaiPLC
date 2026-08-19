@@ -33,6 +33,7 @@ VAR
     iBase : INT;
     diPositionMdeg : DINT;
     udiElapsedMs : DINT;
+    diElapsedBeforeWrap, diElapsedAfterWrap : DINT;
     iPositionHigh : INT;
     iPositionLow : INT;
     iElapsedHigh : INT;
@@ -47,7 +48,11 @@ END_IF;
 
 IF bRunStarted AND NOT bBufferReady THEN
     uiEventCount := 0;
-    uiGeneration := uiGeneration + 1;
+    IF uiGeneration = 32767 THEN
+        uiGeneration := -32768;
+    ELSE
+        uiGeneration := uiGeneration + 1;
+    END_IF;
 END_IF;
 
 (* A sealed buffer is immutable. A controller prevents another run until ACK. *)
@@ -67,8 +72,28 @@ IF NOT bBufferReady AND NOT bRunStarted THEN
             iBase := 6 * uiEventCount;
             rCrossingPosition := rRunOriginDeg + REAL(iDirection) * REAL(iTravelAngle);
             diPositionMdeg := REAL_TO_DINT(rCrossingPosition * 1000.0);
-            (* Raw DINT subtraction preserves the tick's 32 wire bits. *)
-            udiElapsedMs := udiNowTickMs - udiRunStartTickMs;
+            (* Calculate the raw u32 duration without a signed DINT overflow. *)
+            IF (udiNowTickMs < 0) AND (udiRunStartTickMs >= 0) THEN
+                (* The raw tick passed from the positive signed half to the negative half. *)
+                diElapsedBeforeWrap := 2147483647 - udiRunStartTickMs;
+                diElapsedAfterWrap := udiNowTickMs - (-2147483648);
+                IF diElapsedBeforeWrap < 2147483647 - diElapsedAfterWrap THEN
+                    udiElapsedMs := diElapsedBeforeWrap + diElapsedAfterWrap + 1;
+                ELSE
+                    udiElapsedMs := -2147483648 +
+                        (diElapsedBeforeWrap - (2147483647 - diElapsedAfterWrap));
+                END_IF;
+            ELSIF (udiNowTickMs >= 0) AND (udiRunStartTickMs < 0) THEN
+                (* The raw tick crossed its u32 boundary while the run was active. *)
+                IF udiNowTickMs <= 2147483647 + udiRunStartTickMs THEN
+                    udiElapsedMs := udiNowTickMs - udiRunStartTickMs;
+                ELSE
+                    udiElapsedMs := -2147483648 +
+                        (udiNowTickMs - (2147483647 + udiRunStartTickMs));
+                END_IF;
+            ELSE
+                udiElapsedMs := udiNowTickMs - udiRunStartTickMs;
+            END_IF;
             FC_SplitI32(diValue := diPositionMdeg, iHighWord => iPositionHigh, iLowWord => iPositionLow);
             FC_SplitU32(diValue := udiElapsedMs, iHighWord => iElapsedHigh, iLowWord => iElapsedLow);
             aEventWords[iBase + 0] := INT(uiEventCount + 1);
