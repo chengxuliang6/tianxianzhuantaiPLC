@@ -14,6 +14,22 @@ Use `FC_DecodeI32`/`FC_SplitI32` for high-word-first signed 32-bit values and
 post-download read-only gate before PC Modbus writes; it is not a prerequisite
 for the initial user-authorized USB download to an old or empty PLC.
 
+### AutoShop V4.12 type and initial-value note
+
+AutoShop V4.12 does not support `UINT` or `UDINT` in the operator tables. Use
+`INT` for every 16-bit wire value, including values represented as unsigned
+bit patterns. Enter these initial values in decimal:
+
+```text
+D0011 = -15536
+D0201 = 4660
+D0202 = 22136
+```
+
+Offline AutoShop compilation is an operator action. It must finish with `0
+error` and `0 warning` before any request to download; this reference set does
+not claim that compilation has been performed.
+
 ## Variable table: MODBUS_D
 
 Create one **global** variable table named `MODBUS_D` by pasting the `VAR_GLOBAL`
