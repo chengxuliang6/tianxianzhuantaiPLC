@@ -17,6 +17,16 @@ def source(name: str) -> str:
     return (SRC / name).read_text(encoding="utf-8")
 
 
+def function_body(text: str, name: str) -> str:
+    match = re.search(
+        rf"FUNCTION\s+{re.escape(name)}\s*:\s*\w+.*?END_FUNCTION",
+        text,
+        re.DOTALL,
+    )
+    assert match, f"missing {name}"
+    return match.group(0)
+
+
 def test_main_has_all_manual_confirmed_plcopen_calls_and_pins() -> None:
     main = source("PRG_MAIN.st")
     required = {
@@ -270,19 +280,73 @@ def test_signed_raw_rollovers_and_splitter_normalization_are_explicit() -> None:
         re.DOTALL,
     )
     assert re.search(
-        r"FUNCTION\s+FC_SplitU32\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*"
-        r"diValue\s*:\s*DINT\s*;",
-        codec,
+        r"ELSIF\s+\(udiNowTickMs\s*>=\s*0\)\s+AND\s+"
+        r"\(udiRunStartTickMs\s*<\s*0\)\s+THEN.*?"
+        r"diElapsedBeforeWrap\s*:=\s*2147483647\s*-\s*"
+        r"\(udiRunStartTickMs\s*-\s*\(-2147483648\)\)\s*;.*?"
+        r"diElapsedAfterWrap\s*:=\s*udiNowTickMs\s*;.*?"
+        r"IF\s+diElapsedBeforeWrap\s*<\s*2147483647\s*-\s*"
+        r"diElapsedAfterWrap\s+THEN.*?"
+        r"udiElapsedMs\s*:=\s*diElapsedBeforeWrap\s*\+\s*"
+        r"diElapsedAfterWrap\s*\+\s*1\s*;.*?"
+        r"udiElapsedMs\s*:=\s*-2147483648\s*\+\s*"
+        r"\(diElapsedBeforeWrap\s*-\s*\(2147483647\s*-\s*"
+        r"diElapsedAfterWrap\)\)",
+        logger,
+        re.DOTALL,
     )
-    assert re.search(
-        r"FUNCTION\s+FC_SplitI32\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*"
-        r"diValue\s*:\s*DINT\s*;",
-        codec,
-    )
-    assert "diHighWord := diValue / 65536;" in codec
-    assert "diLowWord := diValue MOD 65536;" in codec
-    assert "IF diLowWord < 0 THEN" in codec
-    assert "IF diHighWord >= 32768 THEN" in codec
+
+    for name in ("FC_SplitI32", "FC_SplitU32"):
+        splitter = function_body(codec, name)
+        assert re.search(
+            r"FUNCTION\s+" + name + r"\s*:\s*BOOL\s*\nVAR_INPUT\s*\n\s*"
+            r"diValue\s*:\s*DINT\s*;",
+            splitter,
+        )
+        assert "diHighWord := diValue / 65536;" in splitter
+        assert "diLowWord := diValue MOD 65536;" in splitter
+        assert re.search(
+            r"IF\s+diLowWord\s*<\s*0\s+THEN\s*"
+            r"diLowWord\s*:=\s*diLowWord\s*\+\s*65536\s*;\s*"
+            r"diHighWord\s*:=\s*diHighWord\s*-\s*1\s*;\s*END_IF",
+            splitter,
+        )
+        assert "IF diHighWord >= 32768 THEN diHighWord := diHighWord - 65536; END_IF;" in splitter
+        assert "IF diLowWord >= 32768 THEN diLowWord := diLowWord - 65536; END_IF;" in splitter
+        assert "iHighWord := DINT_TO_INT(diHighWord);" in splitter
+        assert "iLowWord := DINT_TO_INT(diLowWord);" in splitter
+
+
+def test_elapsed_raw_u32_reference_model_handles_signed_boundaries() -> None:
+    dint_min = -2147483648
+    dint_max = 2147483647
+
+    def plc_elapsed_model(start: int, now: int) -> int:
+        if now < 0 <= start:
+            before_wrap = dint_max - start
+            after_wrap = now - dint_min
+        elif now >= 0 > start:
+            before_wrap = dint_max - (start - dint_min)
+            after_wrap = now
+        else:
+            return now - start
+
+        if before_wrap < dint_max - after_wrap:
+            return before_wrap + after_wrap + 1
+        return dint_min + (before_wrap - (dint_max - after_wrap))
+
+    def raw_u32_elapsed(start: int, now: int) -> int:
+        raw = ((now & 0xFFFFFFFF) - (start & 0xFFFFFFFF)) & 0xFFFFFFFF
+        return raw if raw <= dint_max else raw - 0x100000000
+
+    for start, now, expected in (
+        (dint_min, 0, dint_min),
+        (-1, dint_max, dint_min),
+        (dint_min, dint_max, -1),
+        (dint_max, dint_min, 1),
+    ):
+        assert raw_u32_elapsed(start, now) == expected
+        assert plc_elapsed_model(start, now) == expected
 
 
 def test_reference_texts_are_litest_sized_and_avoid_dynamic_allocation() -> None:

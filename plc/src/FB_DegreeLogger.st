@@ -85,11 +85,14 @@ IF NOT bBufferReady AND NOT bRunStarted THEN
                 END_IF;
             ELSIF (udiNowTickMs >= 0) AND (udiRunStartTickMs < 0) THEN
                 (* The raw tick crossed its u32 boundary while the run was active. *)
-                IF udiNowTickMs <= 2147483647 + udiRunStartTickMs THEN
-                    udiElapsedMs := udiNowTickMs - udiRunStartTickMs;
+                diElapsedBeforeWrap := 2147483647 -
+                    (udiRunStartTickMs - (-2147483648));
+                diElapsedAfterWrap := udiNowTickMs;
+                IF diElapsedBeforeWrap < 2147483647 - diElapsedAfterWrap THEN
+                    udiElapsedMs := diElapsedBeforeWrap + diElapsedAfterWrap + 1;
                 ELSE
                     udiElapsedMs := -2147483648 +
-                        (udiNowTickMs - (2147483647 + udiRunStartTickMs));
+                        (diElapsedBeforeWrap - (2147483647 - diElapsedAfterWrap));
                 END_IF;
             ELSE
                 udiElapsedMs := udiNowTickMs - udiRunStartTickMs;
