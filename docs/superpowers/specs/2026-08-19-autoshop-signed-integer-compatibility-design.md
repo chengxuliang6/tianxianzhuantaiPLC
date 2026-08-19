@@ -12,7 +12,9 @@ the installed editor does not offer.
 - Keep the protocol-v2 address map unchanged: command `D0:D19`, status
   `D100:D120`, protocol `D200:D206`, and event words `D2000:D4159`.
 - Use `INT` for all 16-bit wire words, state/command values, flags, counts, and
-  sequence values. The deployed values are within the signed 16-bit range.
+  sequence values. State/command values, flags, and counts are within the
+  signed 16-bit range. Sequence values are raw 16-bit bit patterns and are
+  compared only for equality/inequality, so their signed wraparound is safe.
 - Use `DINT` for signed 32-bit process values and raw 32-bit tick bit patterns.
 - Replace unsigned-only casts in the word codec with explicit signed-value
   correction so high-word-first register data keeps the same 16-bit bits.

@@ -4,7 +4,7 @@
 
 **Goal:** Make the Easy521 AutoShop LiteST reference source use only the data types available in AutoShop V4.12 while preserving protocol-v2 wire values.
 
-**Architecture:** All 16-bit Modbus words, sequence values, state codes, flags, and counts use signed `INT`; the deployed values remain inside the signed range. Signed `DINT` carries 32-bit process values and raw tick bit patterns. The codec explicitly reconstructs an unsigned low word from a negative `INT` and splits a signed `DINT` into two raw `INT` words without `UINT`/`UDINT` casts.
+**Architecture:** All 16-bit Modbus words, state codes, flags, and counts use signed `INT`; deployed state/flag/count values remain inside the signed range. Sequence values are raw 16-bit `INT` bit patterns and are compared only for equality/inequality, so signed wraparound does not affect acknowledgement matching. Signed `DINT` carries 32-bit process values and raw tick bit patterns. The codec explicitly reconstructs an unsigned low word from a negative `INT` and splits a signed `DINT` into two raw `INT` words without `UINT`/`UDINT` casts.
 
 **Tech Stack:** AutoShop LiteST reference `.st` sources, Python `pytest` static contracts.
 
@@ -72,7 +72,7 @@ git commit -m "test: specify AutoShop signed type contract"
 
 - [ ] **Step 1: Replace unsupported declaration types**
 
-Replace every active `UINT` declaration and cast with `INT`; replace every active `UDINT` declaration and cast with `DINT`. Keep all deployed enums, flags, counters, and sequence values below `32768`. Rename no Modbus variable or D address.
+Replace every active `UINT` declaration and cast with `INT`; replace every active `UDINT` declaration and cast with `DINT`. Keep deployed enums, flags, and counters below `32768`; preserve sequence values as raw 16-bit patterns used only for equality/inequality checks. Rename no Modbus variable or D address.
 
 - [ ] **Step 2: Implement signed low-word decode**
 
